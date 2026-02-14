@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\Requester\MaintenanceRequestController as Requester
 use App\Http\Controllers\Api\Requester\MetadataController as RequesterMetadataController;
 use App\Http\Controllers\Api\Requester\NotificationController as RequesterNotificationController;
 use App\Http\Controllers\Api\Requester\ProfileController as RequesterProfileController;
+use App\Http\Controllers\Api\Requester\SettingsController as RequesterSettingsController;
 
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
@@ -43,6 +44,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         Route::get('/profile', [RequesterProfileController::class, 'show']);
         Route::put('/profile', [RequesterProfileController::class, 'update']);
+        Route::get('/settings', [RequesterSettingsController::class, 'show']);
+        Route::put('/settings', [RequesterSettingsController::class, 'update']);
         Route::put('/settings/password', [RequesterProfileController::class, 'updatePassword']);
 
         Route::prefix('/meta')->group(function () {

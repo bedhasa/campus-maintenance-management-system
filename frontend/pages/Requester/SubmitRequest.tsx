@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "../../lib/router-dom-shim";
 import { Send, CircleCheckBig, ArrowRight, Camera, X, AlertCircle } from "lucide-react";
 import { Priority } from "../../types";
@@ -14,11 +14,48 @@ type EditRequest = {
   id: number;
   title: string;
   description: string;
-  category_id: number;
+  category_id: number | null;
+  category_name?: string | null;
   building_id: number | null;
+  building_name?: string | null;
   room_id: number | null;
+  room_name?: string | null;
   custom_location: string | null;
   priority: "low" | "medium" | "high" | "urgent";
+};
+
+type RequestStatusCheckResponse = {
+  success: boolean;
+  request: {
+    status: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed";
+  };
+};
+
+type RequestDetailForEditResponse = {
+  success: boolean;
+  request: {
+    id: number;
+    title: string;
+    description: string;
+    priority: "low" | "medium" | "high" | "urgent";
+    category_id?: number | null;
+    building_id?: number | null;
+    room_id?: number | null;
+    custom_location?: string | null;
+    category?: { id?: number; name?: string | null } | null;
+    building?: { id?: number; name?: string | null } | null;
+    room?: { id?: number; name?: string | null } | null;
+  };
+};
+
+type SettingsResponse = {
+  success: boolean;
+  settings: {
+    default_location: {
+      building_id: number | null;
+      room_id: number | null;
+    };
+  };
 };
 
 type CreateRequestResponse = {
@@ -54,6 +91,8 @@ const fromApiPriority = (value: "low" | "medium" | "high" | "urgent"): Priority 
   return Priority.CRITICAL;
 };
 
+const normalizeName = (value?: string | null) => (value ?? "").trim().toLowerCase();
+
 const SubmitRequest: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -64,6 +103,10 @@ const SubmitRequest: React.FC = () => {
   const [submittedId, setSubmittedId] = useState<number | null>(null);
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [isEditabilityLoading, setIsEditabilityLoading] = useState(false);
+  const [isEditLocked, setIsEditLocked] = useState(false);
+  const [queryEditData, setQueryEditData] = useState<EditRequest | null>(null);
+  const [defaultsApplied, setDefaultsApplied] = useState(false);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
@@ -82,7 +125,50 @@ const SubmitRequest: React.FC = () => {
     description: "",
   });
 
-  const editData = location.state?.editRequest as EditRequest | undefined;
+  const editDataFromState = location.state?.editRequest as EditRequest | undefined;
+  const editIdFromQuery = useMemo(() => {
+    const params = new URLSearchParams(location.search || "");
+    const raw = params.get("edit");
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [location.search]);
+  const editData = editDataFromState ?? queryEditData ?? undefined;
+  const editLockedMessage = "This request is under review and can no longer be modified.";
+  const isEditMode = Boolean(editData?.id);
+  const isFormDisabled = isEditMode && (isEditabilityLoading || isEditLocked);
+
+  useEffect(() => {
+    if (isEditMode || defaultsApplied) return;
+    let cancelled = false;
+
+    const applyDefaults = async () => {
+      try {
+        const data = await apiRequest<SettingsResponse>("/api/requester/settings", { method: "GET" }, true);
+        if (cancelled) return;
+        const buildingId = data.settings?.default_location?.building_id;
+        const roomId = data.settings?.default_location?.room_id;
+        if (!buildingId && !roomId) {
+          setDefaultsApplied(true);
+          return;
+        }
+        setFormData((prev) => ({
+          ...prev,
+          locationType: "structured",
+          building: buildingId ? String(buildingId) : prev.building,
+          room: roomId ? String(roomId) : prev.room,
+        }));
+        setDefaultsApplied(true);
+      } catch {
+        if (!cancelled) setDefaultsApplied(true);
+      }
+    };
+
+    applyDefaults();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditMode, defaultsApplied]);
 
   useEffect(() => {
     const loadMeta = async () => {
@@ -102,18 +188,114 @@ const SubmitRequest: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (editDataFromState || !editIdFromQuery) return;
+    let cancelled = false;
+
+    const loadEditDataFromQuery = async () => {
+      try {
+        const data = await apiRequest<RequestDetailForEditResponse>(
+          `/api/requester/requests/${editIdFromQuery}`,
+          { method: "GET" },
+          true
+        );
+        if (cancelled) return;
+        const req = data.request;
+        const mapped: EditRequest = {
+          id: req.id,
+          title: req.title,
+          description: req.description,
+          category_id: req.category_id ?? req.category?.id ?? null,
+          category_name: req.category?.name ?? null,
+          building_id: req.building_id ?? req.building?.id ?? null,
+          building_name: req.building?.name ?? null,
+          room_id: req.room_id ?? req.room?.id ?? null,
+          room_name: req.room?.name ?? null,
+          custom_location: req.custom_location ?? null,
+          priority: req.priority,
+        };
+        setQueryEditData(mapped);
+      } catch {
+        if (cancelled) return;
+        setError("Failed to load request data for editing.");
+      }
+    };
+
+    loadEditDataFromQuery();
+    return () => {
+      cancelled = true;
+    };
+  }, [editDataFromState, editIdFromQuery]);
+
+  useEffect(() => {
     if (!editData) return;
+    const resolvedCategory =
+      (editData.category_id ? String(editData.category_id) : "") ||
+      String(categories.find((c) => normalizeName(c.name) === normalizeName(editData.category_name))?.id ?? "");
+    const resolvedBuilding =
+      (editData.building_id ? String(editData.building_id) : "") ||
+      String(buildings.find((b) => normalizeName(b.name) === normalizeName(editData.building_name))?.id ?? "");
+    const resolvedRoom =
+      (editData.room_id ? String(editData.room_id) : "") ||
+      String(rooms.find((r) => normalizeName(r.name) === normalizeName(editData.room_name))?.id ?? "");
+    const hasStructuredLocation = Boolean(resolvedBuilding || resolvedRoom || editData.building_name || editData.room_name);
+
     setFormData({
       title: editData.title,
-      building: editData.building_id ? String(editData.building_id) : "",
-      room: editData.room_id ? String(editData.room_id) : "",
-      locationType: editData.building_id ? "structured" : "custom",
+      building: resolvedBuilding,
+      room: resolvedRoom,
+      locationType: hasStructuredLocation ? "structured" : "custom",
       customLocation: editData.custom_location ?? "",
-      problemType: String(editData.category_id),
+      problemType: resolvedCategory,
       urgency: fromApiPriority(editData.priority),
       description: editData.description,
     });
-  }, [editData]);
+  }, [editData, categories, buildings, rooms]);
+
+  useEffect(() => {
+    if (!editData) return;
+    if (!formData.building || formData.room || !editData.room_name) return;
+
+    const resolvedRoom = rooms.find((r) => normalizeName(r.name) === normalizeName(editData.room_name));
+    if (resolvedRoom) {
+      setFormData((prev) => ({ ...prev, room: String(resolvedRoom.id) }));
+    }
+  }, [editData, formData.building, formData.room, rooms]);
+
+  useEffect(() => {
+    if (!editData?.id) {
+      setIsEditLocked(false);
+      setIsEditabilityLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const checkEditability = async () => {
+      setIsEditabilityLoading(true);
+      try {
+        const data = await apiRequest<RequestStatusCheckResponse>(
+          `/api/requester/requests/${editData.id}`,
+          { method: "GET" },
+          true
+        );
+        if (cancelled) return;
+        const isSubmitted = data.request?.status === "submitted";
+        setIsEditLocked(!isSubmitted);
+      } catch {
+        if (cancelled) return;
+        setIsEditLocked(true);
+      } finally {
+        if (!cancelled) {
+          setIsEditabilityLoading(false);
+        }
+      }
+    };
+
+    checkEditability();
+    return () => {
+      cancelled = true;
+    };
+  }, [editData?.id]);
 
   useEffect(() => {
     const loadRooms = async () => {
@@ -177,6 +359,10 @@ const SubmitRequest: React.FC = () => {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isEditLocked) {
+      setError(editLockedMessage);
+      return;
+    }
     if (!formData.description.trim()) {
       setError("Please provide issue details.");
       return;
@@ -272,7 +458,20 @@ const SubmitRequest: React.FC = () => {
         </div>
       )}
 
+      {isEditMode && isEditLocked && (
+        <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800 flex items-center gap-3 animate-in slide-in-from-top-2">
+          <AlertCircle size={20} /> {editLockedMessage}
+        </div>
+      )}
+
+      {isEditMode && isEditabilityLoading && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-700 animate-in slide-in-from-top-2">
+          Checking request edit status...
+        </div>
+      )}
+
       <form onSubmit={onSubmit} className="space-y-6">
+        <fieldset disabled={isFormDisabled} className={isFormDisabled ? "opacity-70" : undefined}>
         {step === 1 && (
           <div className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-slate-100 space-y-8 animate-in slide-in-from-right-4">
             <div className="space-y-3">
@@ -417,10 +616,10 @@ const SubmitRequest: React.FC = () => {
             </div>
           </div>
         )}
+        </fieldset>
       </form>
     </div>
   );
 };
 
 export default SubmitRequest;
-

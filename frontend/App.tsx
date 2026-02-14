@@ -99,6 +99,15 @@ const mapStoredUser = (raw: unknown): User | null => {
 
   const firstName = (source.firstName as string | undefined) ?? (source.fname as string | undefined) ?? "";
   const lastName = (source.lastName as string | undefined) ?? (source.lname as string | undefined) ?? "";
+  const departmentValue = source.department as { name?: string; faculty?: string } | string | undefined;
+  const normalizedDepartment =
+    typeof departmentValue === "string"
+      ? departmentValue
+      : departmentValue?.name
+        ? departmentValue.faculty
+          ? `${departmentValue.name} (${departmentValue.faculty})`
+          : departmentValue.name
+        : "";
   const username =
     (source.username as string | undefined) ??
     (typeof source.email === "string" ? source.email.split("@")[0] : "user");
@@ -113,7 +122,11 @@ const mapStoredUser = (raw: unknown): User | null => {
     name: (source.name as string | undefined) ?? (fullName || username),
     email,
     phone: (source.phone as string | undefined) ?? "",
-    department: (source.department as string | undefined) ?? "",
+    profilePicture:
+      (source.profilePicture as string | undefined) ??
+      (source.profile_picture_url as string | undefined) ??
+      (source.profile_picture as string | undefined),
+    department: normalizedDepartment,
     role: normalizedRole,
     universityId:
       (source.universityId as string | undefined) ??
@@ -169,7 +182,11 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       type: "info",
     },
   ]);
-  const [language, setLanguage] = useState<Language>("en");
+  const [language, setLanguage] = useState<Language>(() => {
+    if (typeof window === "undefined") return "en";
+    const saved = localStorage.getItem("language");
+    return saved === "am" ? "am" : "en";
+  });
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     return resolveStoredUser();
   });
@@ -189,6 +206,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       window.removeEventListener("auth-user-updated", syncCurrentUser);
     };
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("language", language);
+  }, [language]);
 
   const t = (key: keyof typeof translations["en"]) => {
     return translations[language][key] || translations.en[key];

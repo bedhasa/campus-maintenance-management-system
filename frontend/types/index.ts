@@ -37,6 +37,7 @@ export interface User {
   name: string; 
   email: string;
   phone: string;
+  profilePicture?: string;
   department: string;
   role: UserRole;
   universityId: string;

@@ -5,26 +5,41 @@ namespace App\Http\Controllers\Api\Requester;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class ProfileController extends RequesterController
 {
+    private function profilePictureUrl(?string $path): ?string
+    {
+        if (!$path) return null;
+        $url = Storage::disk('public')->url($path);
+        return str_starts_with($url, 'http') ? $url : url($url);
+    }
+
+    private function profilePayload($user): array
+    {
+        return [
+            'id' => $user->id,
+            'fname' => $user->fname,
+            'lname' => $user->lname,
+            'username' => $user->username,
+            'email' => $user->email,
+            'university_id_number' => $user->university_id_number,
+            'phone' => $user->phone,
+            'profile_picture_url' => $this->profilePictureUrl($user->profile_picture),
+            'department' => $user->department,
+            'roles' => $user->roles,
+        ];
+    }
+
     public function show(Request $request): JsonResponse
     {
         $user = $this->requester($request)->load(['department:id,name,faculty', 'roles:id,name,description']);
 
         return response()->json([
             'success' => true,
-            'profile' => [
-                'id' => $user->id,
-                'fname' => $user->fname,
-                'lname' => $user->lname,
-                'username' => $user->username,
-                'email' => $user->email,
-                'university_id_number' => $user->university_id_number,
-                'phone' => $user->phone,
-                'department' => $user->department,
-                'roles' => $user->roles,
-            ],
+            'profile' => $this->profilePayload($user),
         ]);
     }
 
@@ -35,14 +50,25 @@ class ProfileController extends RequesterController
         $validated = $request->validate([
             'fname' => ['sometimes', 'string', 'max:255'],
             'lname' => ['sometimes', 'string', 'max:255'],
+            'username' => ['sometimes', 'string', 'max:255', Rule::unique('users', 'username')->ignore($user->id)],
             'phone' => ['sometimes', 'string', 'max:50'],
+            'profile_picture' => ['sometimes', 'image', 'max:4096', 'mimes:jpg,jpeg,png,webp'],
         ]);
 
+        if ($request->hasFile('profile_picture')) {
+            if ($user->profile_picture) {
+                Storage::disk('public')->delete($user->profile_picture);
+            }
+            $validated['profile_picture'] = $request->file('profile_picture')->store('profile-pictures', 'public');
+        }
+
         $user->update($validated);
+        $user->refresh()->load(['department:id,name,faculty', 'roles:id,name,description']);
 
         return response()->json([
             'success' => true,
             'message' => 'Profile updated successfully.',
+            'profile' => $this->profilePayload($user),
         ]);
     }
 
@@ -72,4 +98,3 @@ class ProfileController extends RequesterController
         ]);
     }
 }
-

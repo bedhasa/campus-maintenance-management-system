@@ -19,6 +19,7 @@ class User extends Authenticatable
         'university_id_number',
         'dept_id',
         'phone',
+        'profile_picture',
     ];
 
     protected $hidden = [
@@ -62,5 +63,10 @@ class User extends Authenticatable
     public function notifications()
     {
         return $this->hasMany(UserNotification::class, 'user_id');
+    }
+
+    public function setting()
+    {
+        return $this->hasOne(UserSetting::class, 'user_id');
     }
 }

@@ -25,6 +25,28 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+html[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+html[data-theme="dark"] {
+  --background: #0b1220;
+  --foreground: #e5e7eb;
+}
+
+html[data-font-size="small"] body {
+  font-size: 14px;
+}
+
+html[data-font-size="medium"] body {
+  font-size: 16px;
+}
+
+html[data-font-size="large"] body {
+  font-size: 18px;
+}
+
 /* Hide scrollbars while preserving scroll behavior (used by sidebar nav). */
 .scrollbar-hide {
   -ms-overflow-style: none;

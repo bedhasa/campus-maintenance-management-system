@@ -108,7 +108,7 @@ const RequesterHistory: React.FC = () => {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input 
               type="text"
-              className="w-full pl-12 pr-4 py-3 bg-gray-50/50 rounded-xl border border-gray-100 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all font-medium text-sm"
+              className="w-full pl-12 pr-4 py-3 bg-gray-50/50 rounded-xl border border-gray-100 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all font-medium text-sm text-gray-900 placeholder:text-gray-400"
               value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
             />
           </div>

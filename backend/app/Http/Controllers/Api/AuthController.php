@@ -8,11 +8,19 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private function profilePictureUrl(?string $path): ?string
+    {
+        if (!$path) return null;
+        $url = Storage::disk('public')->url($path);
+        return str_starts_with($url, 'http') ? $url : url($url);
+    }
+
     public function register(Request $request)
     {
         $validated = $request->validate([
@@ -212,6 +220,7 @@ class AuthController extends Controller
                 'faculty' => $user->department->faculty,
             ] : null,
             'phone' => $user->phone,
+            'profile_picture_url' => $this->profilePictureUrl($user->profile_picture),
             'roles' => $user->roles->map(fn ($role) => [
                 'id' => $role->id,
                 'name' => $role->name,
