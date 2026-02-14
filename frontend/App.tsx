@@ -95,6 +95,11 @@ const mapStoredUser = (raw: unknown): User | null => {
       ((source.roles as Array<{ name?: string }> | undefined)?.[0]?.name ?? undefined),
   );
 
+  const rawRoles = source.roles as Array<{ name?: string }> | undefined;
+  const roleNames = Array.isArray(rawRoles)
+    ? rawRoles.map((r) => (r?.name ?? "").toString().toLowerCase()).filter(Boolean)
+    : [];
+
   if (!normalizedRole) return null;
 
   const firstName = (source.firstName as string | undefined) ?? (source.fname as string | undefined) ?? "";
@@ -133,6 +138,7 @@ const mapStoredUser = (raw: unknown): User | null => {
       (source.university_id_number as string | undefined) ??
       "",
     specialty: source.specialty as string | undefined,
+    roles: roleNames,
   };
 };
 
@@ -151,16 +157,16 @@ const resolveStoredUser = (): User | null => {
   const savedUser = localStorage.getItem("user");
   const savedAuthUser = localStorage.getItem("auth_user");
 
-  const parsedUser = mapStoredUser(safeParse(savedUser));
-  if (parsedUser) {
-    localStorage.setItem("user", JSON.stringify(parsedUser));
-    return parsedUser;
-  }
-
   const parsedAuthUser = mapStoredUser(safeParse(savedAuthUser));
   if (parsedAuthUser) {
     localStorage.setItem("user", JSON.stringify(parsedAuthUser));
     return parsedAuthUser;
+  }
+
+  const parsedUser = mapStoredUser(safeParse(savedUser));
+  if (parsedUser) {
+    localStorage.setItem("user", JSON.stringify(parsedUser));
+    return parsedUser;
   }
 
   return null;

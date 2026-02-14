@@ -62,7 +62,10 @@ export default function LoginForm() {
       writeAuthToken(data.token);
       writeAuthUser(data.user);
 
-      if (data.requires_role_selection) {
+      const roleNames = (data.user.roles ?? []).map((r) => r.name.toLowerCase());
+      const hasSupervisorAdmin = roleNames.includes("supervisor") && roleNames.includes("admin");
+
+      if (data.requires_role_selection && !hasSupervisorAdmin) {
         setSuccessMessage("Login successful. Select your role to continue.");
         setIsTransitioning(true);
         setTimeout(() => router.push("/role-selector"), 1200);

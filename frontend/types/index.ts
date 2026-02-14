@@ -42,6 +42,7 @@ export interface User {
   role: UserRole;
   universityId: string;
   specialty?: string;
+  roles?: string[];
 }
 
 export interface MaintenanceRequest {

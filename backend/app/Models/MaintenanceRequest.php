@@ -11,6 +11,7 @@ class MaintenanceRequest extends Model
 
     protected $fillable = [
         'requester_id',
+        'department_id',
         'title',
         'description',
         'category_id',
@@ -20,11 +21,24 @@ class MaintenanceRequest extends Model
         'asset_id',
         'priority',
         'status',
+        'due_date',
+        'sla_hours',
+        'is_overdue',
+    ];
+
+    protected $casts = [
+        'due_date' => 'datetime',
+        'is_overdue' => 'boolean',
     ];
 
     public function requester()
     {
         return $this->belongsTo(User::class, 'requester_id');
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class, 'department_id');
     }
 
     public function category()
@@ -61,5 +75,14 @@ class MaintenanceRequest extends Model
     {
         return $this->hasMany(RequestImage::class, 'request_id');
     }
-}
 
+    public function workOrders()
+    {
+        return $this->hasMany(WorkOrder::class, 'request_id');
+    }
+
+    public function rating()
+    {
+        return $this->hasOne(TechnicianRating::class, 'request_id');
+    }
+}

@@ -18,6 +18,7 @@ class DatabaseSeeder extends Seeder
             CategorySeeder::class,
             AssetSeeder::class,
             UserSeeder::class,
+            EnterpriseModuleSeeder::class,
         ]);
     }
 }

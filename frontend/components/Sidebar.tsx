@@ -44,6 +44,10 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
   
   const unreadCount = relevantNotifications.filter(n => !n.read).length;
   const basePath = roleToBasePath(role);
+  const hasSupervisorAdminAccess =
+    role === 'supervisor' &&
+    !!currentUser?.roles?.includes('supervisor') &&
+    !!currentUser?.roles?.includes('admin');
 
   const getNavItems = () => {
     const base: Array<{
@@ -63,12 +67,21 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
         break;
       case 'supervisor':
         base.push(
-          { name: t('analytics'), path: '/supervisor/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Operational data" },
-          { name: t('workOrders'), path: '/supervisor/requests', icon: <ClipboardList size={18} />, tooltip: "Review & assign" },
+          { name: t('dashboard'), path: '/supervisor/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Operational data" },
+          { name: 'Requests', path: '/supervisor/requests', icon: <ClipboardList size={18} />, tooltip: "Review approvals" },
+          { name: t('workOrders'), path: '/supervisor/work-orders', icon: <ListTodo size={18} />, tooltip: "Track work execution" },
           { name: 'Technicians', path: '/supervisor/technicians', icon: <Users size={18} />, tooltip: "Manage maintenance staff" },
-          { name: t('allHistory'), path: '/supervisor/history', icon: <History size={18} />, tooltip: "Full campus log" },
-          { name: t('maintenance'), path: '/supervisor/preventive-maintenance', icon: <Calendar size={18} />, tooltip: "Scheduled checks" },
+          { name: 'Manual WO', path: '/supervisor/work-orders/create', icon: <FilePlus size={18} />, tooltip: "Create manual orders" },
+          { name: t('maintenance'), path: '/supervisor/preventive', icon: <Calendar size={18} />, tooltip: "Scheduled checks" },
+          { name: t('analytics'), path: '/supervisor/analytics', icon: <Activity size={18} />, tooltip: "Charts & KPIs" },
+          { name: 'Reports', path: '/supervisor/reports', icon: <History size={18} />, tooltip: "Export and print reports" },
         );
+        if (hasSupervisorAdminAccess) {
+          base.push(
+            { name: 'User Management', path: '/supervisor/user-management', icon: <Users size={18} />, tooltip: "Manage users and roles" },
+            { name: 'System Logs', path: '/supervisor/system-management', icon: <History size={18} />, tooltip: "View audit logs" },
+          );
+        }
         break;
       case 'technician':
         base.push(
@@ -80,6 +93,15 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
         base.push(
           { name: t('dashboard'), path: '/inventory/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Stock summary" },
           { name: t('stockList'), path: '/inventory/list', icon: <Package size={18} />, tooltip: "Manage parts" },
+        );
+        break;
+      case 'admin':
+        base.push(
+          { name: t('dashboard'), path: '/admin/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "System overview" },
+          { name: 'Users', path: '/admin/users', icon: <Users size={18} />, tooltip: "User management" },
+          { name: 'System Logs', path: '/admin/system-logs', icon: <History size={18} />, tooltip: "Audit trail" },
+          { name: t('analytics'), path: '/admin/analytics', icon: <Activity size={18} />, tooltip: "Performance analytics" },
+          { name: 'Reports', path: '/admin/reports', icon: <ClipboardList size={18} />, tooltip: "Export reports" },
         );
         break;
     }

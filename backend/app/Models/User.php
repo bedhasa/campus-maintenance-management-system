@@ -20,6 +20,9 @@ class User extends Authenticatable
         'dept_id',
         'phone',
         'profile_picture',
+        'avg_rating',
+        'total_ratings',
+        'is_active',
     ];
 
     protected $hidden = [
@@ -68,5 +71,40 @@ class User extends Authenticatable
     public function setting()
     {
         return $this->hasOne(UserSetting::class, 'user_id');
+    }
+
+    public function createdWorkOrders()
+    {
+        return $this->hasMany(WorkOrder::class, 'created_by');
+    }
+
+    public function assignedWorkOrders()
+    {
+        return $this->hasMany(WorkOrder::class, 'assigned_to');
+    }
+
+    public function technicianSpecialties()
+    {
+        return $this->hasMany(TechnicianSpecialty::class, 'user_id');
+    }
+
+    public function specialties()
+    {
+        return $this->belongsToMany(Specialty::class, 'technician_specialties', 'user_id', 'specialty_id');
+    }
+
+    public function receivedRatings()
+    {
+        return $this->hasMany(TechnicianRating::class, 'technician_id');
+    }
+
+    public function submittedRatings()
+    {
+        return $this->hasMany(TechnicianRating::class, 'requester_id');
+    }
+
+    public function activityLogs()
+    {
+        return $this->hasMany(SystemActivityLog::class, 'user_id');
     }
 }

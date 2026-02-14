@@ -14,6 +14,24 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    private function resolveAbilitiesAndSelection($roles): array
+    {
+        $roleNames = $roles->pluck('name')->map(fn ($name) => strtolower((string) $name))->values();
+        $hasSupervisor = $roleNames->contains('supervisor');
+        $hasAdmin = $roleNames->contains('admin');
+
+        if ($hasSupervisor && $hasAdmin) {
+            $abilities = ['role:supervisor', 'role:admin'];
+            return [$abilities, false];
+        }
+
+        if ($roles->count() === 1) {
+            return [['role:' . $roles->first()->name], false];
+        }
+
+        return [['role:select'], true];
+    }
+
     private function profilePictureUrl(?string $path): ?string
     {
         if (!$path) return null;
@@ -55,9 +73,7 @@ class AuthController extends Controller
 
         $user->load(['roles', 'department']);
         $roles = $user->roles;
-        $abilities = $roles->count() === 1
-            ? ['role:' . $roles->first()->name]
-            : ['role:select'];
+        [$abilities, $requiresRoleSelection] = $this->resolveAbilitiesAndSelection($roles);
 
         $token = $user->createToken('auth_token', $abilities)->plainTextToken;
 
@@ -65,7 +81,7 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Registration successful.',
             'token' => $token,
-            'requires_role_selection' => $roles->count() > 1,
+            'requires_role_selection' => $requiresRoleSelection,
             'user' => $this->userPayload($user, $abilities),
         ], 201);
     }
@@ -102,9 +118,7 @@ class AuthController extends Controller
     $user->load(['roles', 'department']);
     $roles = $user->roles;
 
-    $abilities = $roles->count() === 1
-        ? ['role:' . $roles->first()->name]
-        : ['role:select'];
+    [$abilities, $requiresRoleSelection] = $this->resolveAbilitiesAndSelection($roles);
 
     $token = $user->createToken('auth_token', $abilities)->plainTextToken;
 
@@ -112,7 +126,7 @@ class AuthController extends Controller
         'success' => true,
         'message' => 'Login successful.',
         'token' => $token,
-        'requires_role_selection' => $roles->count() > 1,
+        'requires_role_selection' => $requiresRoleSelection,
         'user' => $this->userPayload($user, $abilities),
     ]);
 }
@@ -199,11 +213,18 @@ class AuthController extends Controller
     private function userPayload(User $user, array $abilities): array
     {
         $activeRole = null;
+        $abilityRoleMap = [];
         foreach ($abilities as $ability) {
             if (Str::startsWith($ability, 'role:') && $ability !== 'role:select') {
-                $activeRole = Str::after($ability, 'role:');
-                break;
+                $roleName = Str::after($ability, 'role:');
+                $abilityRoleMap[] = $roleName;
             }
+        }
+
+        if (in_array('supervisor', $abilityRoleMap, true)) {
+            $activeRole = 'supervisor';
+        } elseif (!empty($abilityRoleMap)) {
+            $activeRole = $abilityRoleMap[0];
         }
 
         return [

@@ -67,6 +67,17 @@ class UserSeeder extends Seeder
                 'phone' => '555-100-1004',
                 'roles' => [$roleRequester, $roleTechnician],
             ],
+            [
+                'fname' => 'Sam',
+                'lname' => 'OpsAdmin',
+                'username' => 'opsadmin.demo',
+                'email' => 'opsadmin@demo.com',
+                'password' => Hash::make('123456'),
+                'university_id_number' => 'U1001005',
+                'dept_id' => $departments->first()->id,
+                'phone' => '555-100-1005',
+                'roles' => [$roleSupervisor, $roleAdmin],
+            ],
         ];
 
         foreach ($demoUsers as $data) {

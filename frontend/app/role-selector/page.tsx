@@ -53,6 +53,12 @@ export default function RoleSelector() {
         const data = await apiRequest<UserResponse>("/api/user", { method: "GET" }, true);
         setUser(data.user);
         writeAuthUser(data.user);
+
+        const roleNames = (data.user.roles ?? []).map((r) => r.name.toLowerCase());
+        if (roleNames.includes("supervisor") && roleNames.includes("admin")) {
+          router.replace("/supervisor/dashboard");
+          return;
+        }
       } catch (err) {
         clearAuth();
         router.push("/login");

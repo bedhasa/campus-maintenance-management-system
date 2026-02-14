@@ -20,6 +20,7 @@ class UserSetting extends Model
         'default_building_id',
         'default_room_id',
         'timezone',
+        'default_dashboard_filter',
     ];
 
     protected $casts = [
@@ -44,4 +45,3 @@ class UserSetting extends Model
         return $this->belongsTo(Room::class, 'default_room_id');
     }
 }
-

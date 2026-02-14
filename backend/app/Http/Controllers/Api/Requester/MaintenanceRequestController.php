@@ -7,6 +7,7 @@ use App\Models\RequestImage;
 use App\Models\RequestMessage;
 use App\Models\RequestStatusLog;
 use App\Models\UserNotification;
+use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -124,6 +125,7 @@ class MaintenanceRequestController extends RequesterController
         $ticket = MaintenanceRequest::create([
             ...$validated,
             'requester_id' => $user->id,
+            'department_id' => $user->dept_id,
             'status' => 'submitted',
         ]);
 
@@ -230,6 +232,12 @@ class MaintenanceRequestController extends RequesterController
         if ($ticket->requester_id !== $user->id) {
             return $this->forbidden();
         }
+        if ($ticket->status === 'closed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chat is locked after request closure.',
+            ], 422);
+        }
 
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
@@ -240,6 +248,8 @@ class MaintenanceRequestController extends RequesterController
             'sender_id' => $user->id,
             'message' => $validated['message'],
         ]);
+
+        ActivityLogger::log($user->id, 'chat', 'add_message', $message->id, "Message added on request #{$ticket->id}.", $request);
 
         return response()->json([
             'success' => true,
@@ -254,6 +264,12 @@ class MaintenanceRequestController extends RequesterController
         $ticket = MaintenanceRequest::findOrFail($id);
         if ($ticket->requester_id !== $user->id) {
             return $this->forbidden();
+        }
+        if ($ticket->status === 'closed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chat is locked after request closure.',
+            ], 422);
         }
 
         $message = RequestMessage::where('request_id', $ticket->id)->findOrFail($messageId);
@@ -276,6 +292,8 @@ class MaintenanceRequestController extends RequesterController
             'edited_at' => now(),
         ]);
 
+        ActivityLogger::log($user->id, 'chat', 'edit_message', $message->id, "Message updated on request #{$ticket->id}.", $request);
+
         return response()->json([
             'success' => true,
             'message' => 'Message updated.',
@@ -289,6 +307,12 @@ class MaintenanceRequestController extends RequesterController
         $ticket = MaintenanceRequest::findOrFail($id);
         if ($ticket->requester_id !== $user->id) {
             return $this->forbidden();
+        }
+        if ($ticket->status === 'closed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Chat is locked after request closure.',
+            ], 422);
         }
 
         $message = RequestMessage::where('request_id', $ticket->id)->findOrFail($messageId);
@@ -305,6 +329,8 @@ class MaintenanceRequestController extends RequesterController
         $message->update([
             'deleted_at' => now(),
         ]);
+
+        ActivityLogger::log($user->id, 'chat', 'chat_delete', $message->id, "Message soft deleted on request #{$ticket->id}.", $request);
 
         return response()->json([
             'success' => true,
