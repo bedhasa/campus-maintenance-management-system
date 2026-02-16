@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect } from "react";
 import { Bell, CheckCheck, ChevronRight, MessageSquare, ShieldAlert, ClipboardCheck, Clock3 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import RequestDetailModal from "@/components/RequestDetailModal";
+import { ListSkeleton } from "@/components/PageSkeleton";
 import { MaintenanceRequest, Priority, TicketStatus } from "@/types";
 
 type NotificationItem = {
@@ -249,7 +250,7 @@ export default function RoutePage() {
         </div>
       </div>
 
-      {loading && <p className="text-sm font-medium text-gray-500">Loading notifications...</p>}
+      {loading && <ListSkeleton rows={5} />}
       {error && <p className="text-sm font-bold text-red-600">{error}</p>}
 
       {!loading && !error && (

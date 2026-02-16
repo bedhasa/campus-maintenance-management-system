@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Bell, Globe, Zap, Save, CheckCircle2, Clock, Sparkles, AlertCircle } from "lucide-react";
 import { useApp } from "@/context/AppContext";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 type Building = { id: number; name: string };
 type Room = { id: number; building_id: number; name: string };
@@ -170,7 +171,7 @@ export default function SettingsPage() {
   );
 
   if (loading) {
-    return <p className="text-sm font-medium text-slate-500">Loading settings...</p>;
+    return <PageSkeleton cards={3} rows={4} />;
   }
 
   return (
@@ -303,4 +304,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

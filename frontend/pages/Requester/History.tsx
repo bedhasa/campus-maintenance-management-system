@@ -5,6 +5,7 @@ import StatusBadge from '../../components/StatusBadge';
 import { TicketStatus, Priority } from '../../types';
 import { apiRequest } from '../../lib/api';
 import RequestDetailModal from '../../components/RequestDetailModal';
+import { TableRowsSkeleton } from '../../components/PageSkeleton';
 
 type ApiRequestItem = {
   id: number;
@@ -155,9 +156,7 @@ const RequesterHistory: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {loading && (
-                <tr>
-                  <td className="px-8 py-8 text-sm font-medium text-gray-500" colSpan={5}>Loading requests...</td>
-                </tr>
+                <TableRowsSkeleton rows={4} cols={5} />
               )}
               {error && (
                 <tr>

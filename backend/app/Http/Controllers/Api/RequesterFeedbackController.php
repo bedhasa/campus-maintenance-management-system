@@ -20,10 +20,10 @@ class RequesterFeedbackController extends ModuleController
             return $this->forbidden();
         }
 
-        if ($ticket->status !== 'closed') {
+        if (!in_array($ticket->status, ['completed', 'closed'], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Rating is allowed only after request closure.',
+                'message' => 'Rating is allowed only after work completion.',
             ], 422);
         }
 
@@ -70,4 +70,3 @@ class RequesterFeedbackController extends ModuleController
         ]);
     }
 }
-

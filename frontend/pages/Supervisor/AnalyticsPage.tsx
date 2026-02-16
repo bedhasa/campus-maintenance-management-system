@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 type DataPoint = { name: string; total: number };
 type Analytics = {
@@ -39,7 +40,7 @@ export default function AnalyticsPage() {
     </div>
   );
 
-  if (!data) return <p className="text-sm text-slate-500">Loading analytics...</p>;
+  if (!data) return <PageSkeleton cards={2} rows={4} />;
 
   return (
     <div className="space-y-6">
@@ -57,4 +58,3 @@ export default function AnalyticsPage() {
     </div>
   );
 }
-

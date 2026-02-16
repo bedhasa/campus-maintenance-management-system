@@ -237,7 +237,8 @@ class SupervisorController extends ModuleController
 
         $ticket = MaintenanceRequest::query()
             ->with([
-                'requester:id,fname,lname,phone,email',
+                'requester:id,fname,lname,phone,email,profile_picture',
+                'department:id,name',
                 'category:id,name',
                 'building:id,name',
                 'room:id,name',
@@ -245,8 +246,24 @@ class SupervisorController extends ModuleController
                 'messages' => fn ($q) => $q->whereNull('deleted_at')->with('sender:id,fname,lname,phone')->orderBy('created_at'),
                 'images',
                 'statusLogs' => fn ($q) => $q->with('changedBy:id,fname,lname,phone')->orderBy('created_at'),
+                'workOrders' => fn ($q) => $q
+                    ->with('assignee:id,fname,lname,phone,email,profile_picture')
+                    ->orderByDesc('id'),
+                'rating' => fn ($q) => $q->with('requester:id,fname,lname,profile_picture'),
             ])
             ->findOrFail($id);
+
+        if ($ticket->requester) {
+            $ticket->requester->setAttribute('profile_picture_url', $this->profilePictureUrl($ticket->requester->profile_picture));
+        }
+        foreach ($ticket->workOrders as $workOrder) {
+            if ($workOrder->assignee) {
+                $workOrder->assignee->setAttribute('profile_picture_url', $this->profilePictureUrl($workOrder->assignee->profile_picture));
+            }
+        }
+        if ($ticket->rating?->requester) {
+            $ticket->rating->requester->setAttribute('profile_picture_url', $this->profilePictureUrl($ticket->rating->requester->profile_picture));
+        }
 
         return response()->json([
             'success' => true,
@@ -616,6 +633,13 @@ class SupervisorController extends ModuleController
             ], 422);
         }
 
+        if (!$ticket->rating) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Requester feedback is required before closure.',
+            ], 422);
+        }
+
         $oldStatus = $ticket->status;
         $ticket->update(['status' => 'closed']);
 
@@ -923,5 +947,14 @@ class SupervisorController extends ModuleController
             "Spare Part Total Cost: {$summary['spare_part_total_cost']}",
             "Avg Resolution Time (hours): {$summary['average_resolution_time_hours']}",
         ]);
+    }
+
+    private function profilePictureUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+        $url = Storage::disk('public')->url($path);
+        return str_starts_with($url, 'http') ? $url : url($url);
     }
 }

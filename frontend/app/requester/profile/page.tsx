@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
 import { apiRequest, writeAuthUser } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 import {
   User,
   Mail,
@@ -78,7 +79,7 @@ export default function ProfilePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiRequest<ProfileResponse>("/api/requester/profile", { method: "GET" }, true);
+      const data = await apiRequest<ProfileResponse>("/api/me/profile", { method: "GET" }, true);
       const nextForm = {
         fname: data.profile.fname ?? "",
         lname: data.profile.lname ?? "",
@@ -131,14 +132,13 @@ export default function ProfilePage() {
     setError(null);
     try {
       const body = new FormData();
-      body.append("_method", "PUT");
       body.append("username", form.username.trim().toLowerCase());
       body.append("phone", form.phone.trim());
       if (selectedImage) body.append("profile_picture", selectedImage);
 
       const data = await apiRequest<ProfileResponse>(
-        "/api/requester/profile",
-        { method: "POST", body },
+        "/api/me/profile",
+        { method: "PUT", body },
         true,
       );
 
@@ -182,7 +182,7 @@ export default function ProfilePage() {
 
     try {
       const data = await apiRequest<PasswordUpdateResponse>(
-        "/api/requester/settings/password",
+        "/api/me/password",
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -202,7 +202,7 @@ export default function ProfilePage() {
   };
 
   if (loading) {
-    return <p className="text-sm text-gray-500 font-medium">Loading profile...</p>;
+    return <PageSkeleton cards={2} rows={4} />;
   }
 
   return (

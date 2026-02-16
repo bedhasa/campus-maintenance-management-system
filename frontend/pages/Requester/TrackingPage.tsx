@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { apiRequest } from '../../lib/api';
 import RequestDetailModal from '../../components/RequestDetailModal';
+import { ListSkeleton } from '../../components/PageSkeleton';
 
 type ApiRequestItem = {
   id: number;
@@ -135,7 +136,7 @@ const TrackingPage: React.FC = () => {
             
             <div className="space-y-4">
               {isLoading && (
-                <div className="p-8 text-center text-sm font-medium text-gray-500">Loading dashboard...</div>
+                <ListSkeleton rows={4} className="p-2 space-y-3" />
               )}
               {error && (
                 <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-red-600 text-sm font-bold">

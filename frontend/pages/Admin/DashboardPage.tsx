@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 type Counts = { users: number; active_users: number; technicians: number; supervisors: number };
 
@@ -16,7 +17,7 @@ export default function AdminDashboardPage() {
     void run();
   }, []);
 
-  if (!counts) return <p className="text-sm text-slate-500">Loading admin dashboard...</p>;
+  if (!counts) return <PageSkeleton cards={4} rows={2} />;
 
   return (
     <div className="space-y-6">
@@ -32,4 +33,3 @@ export default function AdminDashboardPage() {
     </div>
   );
 }
-

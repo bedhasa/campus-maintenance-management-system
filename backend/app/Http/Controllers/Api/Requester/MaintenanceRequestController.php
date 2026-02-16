@@ -10,6 +10,7 @@ use App\Models\UserNotification;
 use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class MaintenanceRequestController extends RequesterController
 {
@@ -78,11 +79,12 @@ class MaintenanceRequestController extends RequesterController
         $user = $this->requester($request);
         $ticket = MaintenanceRequest::query()
             ->with([
-                'requester:id,fname,lname,phone,email',
+                'requester:id,fname,lname,phone,email,profile_picture',
                 'category:id,name',
                 'building:id,name',
                 'room:id,name',
                 'asset:id,name',
+                'department:id,name',
                 'statusLogs' => function ($query) {
                     $query
                         ->with('changedBy:id,fname,lname,phone')
@@ -95,11 +97,27 @@ class MaintenanceRequestController extends RequesterController
                         ->orderBy('created_at');
                 },
                 'images',
+                'workOrders' => fn ($q) => $q
+                    ->with('assignee:id,fname,lname,phone,email,profile_picture')
+                    ->orderByDesc('id'),
+                'rating' => fn ($q) => $q->with('requester:id,fname,lname,profile_picture'),
             ])
             ->findOrFail($id);
 
         if ($ticket->requester_id !== $user->id) {
             return $this->forbidden();
+        }
+
+        if ($ticket->requester) {
+            $ticket->requester->setAttribute('profile_picture_url', $this->profilePictureUrl($ticket->requester->profile_picture));
+        }
+        foreach ($ticket->workOrders as $workOrder) {
+            if ($workOrder->assignee) {
+                $workOrder->assignee->setAttribute('profile_picture_url', $this->profilePictureUrl($workOrder->assignee->profile_picture));
+            }
+        }
+        if ($ticket->rating?->requester) {
+            $ticket->rating->requester->setAttribute('profile_picture_url', $this->profilePictureUrl($ticket->rating->requester->profile_picture));
         }
 
         return response()->json([
@@ -380,5 +398,14 @@ class MaintenanceRequestController extends RequesterController
             'message' => 'Image uploaded.',
             'image' => $image,
         ], 201);
+    }
+
+    private function profilePictureUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+        $url = Storage::disk('public')->url($path);
+        return str_starts_with($url, 'http') ? $url : url($url);
     }
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 type ProfileResponse = {
   success: boolean;
@@ -34,7 +35,7 @@ export default function ProfilePage() {
   }, []);
 
   if (error) return <p className="text-sm text-red-600 font-semibold">{error}</p>;
-  if (!profile) return <p className="text-sm text-gray-500">Loading profile...</p>;
+  if (!profile) return <PageSkeleton cards={2} rows={2} />;
 
   return (
     <div className="space-y-6">
@@ -51,4 +52,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-

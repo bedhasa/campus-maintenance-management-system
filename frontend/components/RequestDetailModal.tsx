@@ -5,7 +5,7 @@ import {
   X, MapPin, Wrench, FileText, MessageSquare, Send, 
   Clock, Phone, User, CheckCircle2, 
   UserCheck, ShieldCheck, PlayCircle, ClipboardCheck,
-  Edit2, Trash2, Check
+  Edit2, Trash2, Check, Star
 } from 'lucide-react';
 
 import { MaintenanceRequest, Priority, RequestMessage, TicketStatus } from '@/types';
@@ -25,6 +25,8 @@ type ApiUser = {
   fname: string;
   lname: string;
   phone?: string | null;
+  email?: string | null;
+  profile_picture_url?: string | null;
 };
 
 type ApiStatusLog = {
@@ -53,6 +55,7 @@ type ApiRequestDetail = {
   status: 'submitted' | 'approved' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'closed';
   created_at: string;
   updated_at?: string;
+  due_date?: string | null;
   category_id?: number | null;
   building_id?: number | null;
   room_id?: number | null;
@@ -64,6 +67,23 @@ type ApiRequestDetail = {
   statusLogs?: ApiStatusLog[];
   status_logs?: ApiStatusLog[];
   messages?: ApiMessage[];
+  work_orders?: Array<{
+    id: number;
+    work_status: string;
+    scheduled_date?: string | null;
+    scheduled_time?: string | null;
+    assignee?: ApiUser | null;
+  }>;
+  rating?: {
+    rating: number;
+    comment?: string | null;
+    created_at: string;
+  } | null;
+};
+
+type ParticipantState = {
+  requester?: ApiUser | null;
+  technician?: ApiUser | null;
 };
 
 type EditRequestState = {
@@ -137,11 +157,15 @@ const mapApiDetailToMaintenanceRequest = (
   fallback: MaintenanceRequest
 ): MaintenanceRequest => {
   const logs = detail.statusLogs ?? detail.status_logs ?? [];
+  const latestWorkOrder = (detail.work_orders ?? [])[0];
   const approvedLog = logs.find((log) => log.new_status === 'approved');
   const assignedLog = logs.find((log) => log.new_status === 'assigned');
   const completedLog = logs.find((log) => log.new_status === 'completed' || log.new_status === 'closed');
   const requesterName = fullName(detail.requester) || fallback.requesterName || 'Requester';
   const location = detail.custom_location || [detail.building?.name, detail.room?.name].filter(Boolean).join(' / ') || fallback.location || '-';
+  const scheduledAt = latestWorkOrder?.scheduled_date
+    ? `${latestWorkOrder.scheduled_date}${latestWorkOrder.scheduled_time ? ` ${latestWorkOrder.scheduled_time}` : ''}`
+    : fallback.scheduledAt;
 
   return {
     ...fallback,
@@ -159,11 +183,14 @@ const mapApiDetailToMaintenanceRequest = (
     updatedAt: detail.updated_at ?? fallback.updatedAt ?? detail.created_at,
     approvedAt: approvedLog?.created_at ?? fallback.approvedAt,
     approvedBy: fullName(actorFromLog(approvedLog)) || fallback.approvedBy,
-    technicianName: fullName(actorFromLog(assignedLog)) || fallback.technicianName,
-    technicianPhone: actorFromLog(assignedLog)?.phone ?? fallback.technicianPhone,
+    technicianName: fullName(latestWorkOrder?.assignee) || fullName(actorFromLog(assignedLog)) || fallback.technicianName,
+    technicianPhone: latestWorkOrder?.assignee?.phone ?? actorFromLog(assignedLog)?.phone ?? fallback.technicianPhone,
     assignedAt: assignedLog?.created_at ?? fallback.assignedAt,
+    scheduledAt,
     completedAt: completedLog?.created_at ?? fallback.completedAt,
     completionNotes: completedLog?.comment ?? fallback.completionNotes,
+    rating: detail.rating?.rating ?? fallback.rating,
+    requesterComment: detail.rating?.comment ?? fallback.requesterComment,
     messages: (detail.messages ?? []).map((msg): RequestMessage => ({
       id: String(msg.id),
       senderId: String(msg.sender_id),
@@ -178,13 +205,17 @@ const mapApiDetailToMaintenanceRequest = (
 
 export default function RequestDetailModal({ request: initialRequest, onClose, initialView = 'info' }: RequestDetailModalProps) {
   const navigate = useNavigate();
-  const { editRequestMessage, currentUser, requests } = useApp();
+  const { currentUser, requests } = useApp();
   const [messageText, setMessageText] = useState('');
   const [view, setView] = useState<'info' | 'chat'>(initialView);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [rawStatus, setRawStatus] = useState<ApiRequestDetail['status'] | null>(null);
+  const [participants, setParticipants] = useState<ParticipantState>({});
+  const [ratingForm, setRatingForm] = useState({ rating: 5, comment: '' });
+  const [ratingSaving, setRatingSaving] = useState(false);
   const [editRequestState, setEditRequestState] = useState<EditRequestState | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -201,6 +232,8 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     return match ? match[0] : raw;
   }, [initialRequest.id]);
   const canEditRequest = request.status === TicketStatus.PENDING;
+  const chatLocked = rawStatus === 'closed';
+  const canSubmitFeedback = rawStatus === 'completed' && !request.rating;
 
   const mapToEditState = (detail: ApiRequestDetail): EditRequestState => {
     const categoryId = detail.category_id ?? detail.category?.id ?? null;
@@ -240,6 +273,11 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         );
         if (cancelled) return;
         setEditRequestState(mapToEditState(data.request));
+        setRawStatus(data.request.status);
+        setParticipants({
+          requester: data.request.requester ?? null,
+          technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+        });
         setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
       } catch (error) {
         if (cancelled) return;
@@ -265,7 +303,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     const message = messageText.trim();
-    if (!message || !endpointRequestId) return;
+    if (!message || !endpointRequestId || chatLocked) return;
 
     try {
       setSending(true);
@@ -285,6 +323,11 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         { method: 'GET' },
         true
       );
+      setRawStatus(data.request.status);
+      setParticipants({
+        requester: data.request.requester ?? null,
+        technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
       setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
       setMessageText('');
     } catch (error) {
@@ -300,10 +343,46 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
   };
 
   const handleSaveEdit = (msgId: string) => {
-    if (editValue.trim()) {
-      editRequestMessage(request.id, msgId, editValue.trim());
-      setEditingMessageId(null);
-    }
+    const run = async () => {
+      if (!editValue.trim() || !endpointRequestId) return;
+
+      const parsed = Number(msgId);
+      const endpointMessageId = Number.isFinite(parsed) ? String(parsed) : msgId.match(/\d+/)?.[0];
+      if (!endpointMessageId) {
+        setLoadError('Failed to resolve message id for edit.');
+        return;
+      }
+
+      try {
+        setLoadError(null);
+        await apiRequest(
+          `/api/requester/requests/${endpointRequestId}/messages/${endpointMessageId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: editValue.trim() }),
+          },
+          true
+        );
+        const data = await apiRequest<RequestDetailResponse>(
+          `/api/requester/requests/${endpointRequestId}`,
+          { method: 'GET' },
+          true
+        );
+        setRawStatus(data.request.status);
+        setParticipants({
+          requester: data.request.requester ?? null,
+          technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+        });
+        setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
+        setEditingMessageId(null);
+        setEditValue('');
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : 'Failed to edit message.');
+      }
+    };
+
+    void run();
   };
 
   const handleDelete = (msgId: string) => {
@@ -330,6 +409,11 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
           { method: 'GET' },
           true
         );
+        setRawStatus(data.request.status);
+        setParticipants({
+          requester: data.request.requester ?? null,
+          technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+        });
         setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
       } catch (error) {
         setLoadError(error instanceof Error ? error.message : 'Failed to delete message.');
@@ -337,6 +421,42 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     };
 
     void run();
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!endpointRequestId || !canSubmitFeedback) return;
+    try {
+      setRatingSaving(true);
+      setLoadError(null);
+      await apiRequest(
+        `/api/requester/requests/${endpointRequestId}/rating`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rating: ratingForm.rating,
+            comment: ratingForm.comment.trim() || undefined,
+          }),
+        },
+        true
+      );
+
+      const data = await apiRequest<RequestDetailResponse>(
+        `/api/requester/requests/${endpointRequestId}`,
+        { method: 'GET' },
+        true
+      );
+      setRawStatus(data.request.status);
+      setParticipants({
+        requester: data.request.requester ?? null,
+        technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
+      setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to submit feedback.');
+    } finally {
+      setRatingSaving(false);
+    }
   };
 
   const formatDate = (dateStr?: string) => {
@@ -434,7 +554,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
             className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center space-x-2 transition-all ${view === 'chat' ? 'bg-white text-[#003366] shadow-md' : 'text-slate-400'}`}
           >
             <MessageSquare size={14} />
-            <span>Activity</span>
+            <span>Chat</span>
             {(request.messages?.length || 0) > 0 && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>}
           </button>
         </div>
@@ -453,6 +573,51 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
           )}
           {view === 'info' ? (
             <div className="space-y-8 animate-in fade-in slide-in-from-left-2 duration-300">
+              {rawStatus === 'submitted' && (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-xs font-bold text-emerald-700">
+                  Expected response within 24 hours.
+                </div>
+              )}
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="bg-white rounded-[1.8rem] border border-slate-100 p-4">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Requester Contact</p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 overflow-hidden flex items-center justify-center text-slate-700 font-black">
+                      {participants.requester?.profile_picture_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={participants.requester.profile_picture_url} alt={request.requesterName} className="w-full h-full object-cover" />
+                      ) : (
+                        (request.requesterName || "R").charAt(0)
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-900 truncate">{request.requesterName}</p>
+                      <p className="text-[11px] font-bold text-slate-500">{participants.requester?.phone || "-"}</p>
+                      <p className="text-[11px] font-bold text-slate-500 truncate">{participants.requester?.email || "-"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-[1.8rem] border border-slate-100 p-4">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Technician Contact</p>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-blue-50 overflow-hidden flex items-center justify-center text-blue-700 font-black">
+                      {participants.technician?.profile_picture_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={participants.technician.profile_picture_url} alt={request.technicianName || "Technician"} className="w-full h-full object-cover" />
+                      ) : (
+                        (request.technicianName || "T").charAt(0)
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-900 truncate">{request.technicianName || "Pending Assignment"}</p>
+                      <p className="text-[11px] font-bold text-slate-500">{participants.technician?.phone || "-"}</p>
+                      <p className="text-[11px] font-bold text-slate-500 truncate">{participants.technician?.email || "-"}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
               
               {request.technicianName && (
                 <section className="bg-[#003366] p-6 rounded-[2.5rem] text-white shadow-xl shadow-blue-900/10 relative overflow-hidden group">
@@ -466,6 +631,9 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200">Active Technician</p>
                       <h3 className="text-xl font-black">{request.technicianName}</h3>
+                      {request.scheduledAt && (
+                        <p className="text-[11px] font-bold text-emerald-200 mt-2">Scheduled: {request.scheduledAt}</p>
+                      )}
                       <p className="text-[10px] font-bold text-blue-300 mt-0.5 uppercase tracking-widest">Maintenance Team • HU</p>
                     </div>
                   </div>
@@ -483,7 +651,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                 <div className="flex items-start space-x-4">
                   <div className="p-2.5 bg-white rounded-xl text-blue-500 shadow-sm border border-slate-50"><MapPin size={18} /></div>
                   <div>
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Site Location</p>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Location - Building, Room</p>
                     {(request.building || request.room) ? (
                       <p className="text-sm font-bold text-slate-800">
                         Building: {request.building || '-'} | Room: {request.room || '-'}
@@ -565,6 +733,55 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                     />
                  </div>
               </section>
+
+              {canSubmitFeedback && (
+                <section className="rounded-[2.5rem] border border-amber-100 bg-amber-50/60 p-6 space-y-4">
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-700 flex items-center gap-2">
+                    <Star size={14} /> Rate Completed Work
+                  </h3>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Rating</label>
+                    <select
+                      value={ratingForm.rating}
+                      onChange={(e) => setRatingForm((p) => ({ ...p, rating: Number(e.target.value) }))}
+                      className="w-full p-3 rounded-xl border border-amber-100 bg-white text-sm font-bold text-slate-800"
+                    >
+                      <option value={5}>5 - Excellent</option>
+                      <option value={4}>4 - Good</option>
+                      <option value={3}>3 - Fair</option>
+                      <option value={2}>2 - Poor</option>
+                      <option value={1}>1 - Very Poor</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Comment</label>
+                    <textarea
+                      value={ratingForm.comment}
+                      onChange={(e) => setRatingForm((p) => ({ ...p, comment: e.target.value }))}
+                      placeholder="Share your experience with the completed work..."
+                      className="w-full p-3 rounded-xl border border-amber-100 bg-white text-sm min-h-[90px]"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSubmitFeedback}
+                    disabled={ratingSaving}
+                    className="w-full py-3 bg-amber-500 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-600 disabled:opacity-50"
+                  >
+                    {ratingSaving ? 'Submitting...' : 'Submit Feedback'}
+                  </button>
+                </section>
+              )}
+
+              {request.rating && (
+                <section className="rounded-[2.5rem] border border-emerald-100 bg-emerald-50/60 p-6">
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700 mb-3 flex items-center gap-2">
+                    <Star size={14} /> Submitted Feedback
+                  </h3>
+                  <p className="text-sm font-bold text-slate-800">Rating: {request.rating}/5</p>
+                  {request.requesterComment && <p className="text-sm text-slate-700 italic mt-2">&quot;{request.requesterComment}&quot;</p>}
+                </section>
+              )}
             </div>
           ) : (
             <div className="h-full flex flex-col animate-in fade-in slide-in-from-right-2 duration-300">
@@ -579,7 +796,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                 <div className="flex-1 space-y-6 pb-20">
                   {request.messages.map((msg) => {
                     const isMe = msg.senderId === currentUser?.id;
-                    const canAct = isMe && isEditable(msg.createdAt);
+                    const canAct = !chatLocked && isMe && isEditable(msg.createdAt);
                     const isEditing = editingMessageId === msg.id;
 
                     return (
@@ -641,17 +858,21 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         {/* Chat Input */}
         {view === 'chat' && (
           <div className="p-4 bg-white border-t border-slate-100 sticky bottom-0 z-30 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+            <p className="text-[9px] font-bold text-slate-400 mb-2 uppercase tracking-widest">
+              Chat for this request only. Messages can be edited or deleted within 5 minutes.
+            </p>
             <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
               <input 
                 type="text" 
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
-                placeholder="Message maintenance staff..."
+                disabled={chatLocked}
+                placeholder={chatLocked ? "Chat is closed after request closure." : "Message maintenance staff..."}
                 className="flex-1 px-5 py-3.5 bg-slate-50 border border-slate-100 rounded-1.5rem text-slate-900 placeholder:text-slate-400 text-sm font-medium focus:ring-4 focus:ring-blue-500/10 transition-all outline-none"
               />
               <button 
                 type="submit"
-                disabled={sending || !messageText.trim()}
+                disabled={chatLocked || sending || !messageText.trim()}
                 className="p-4 bg-[#003366] text-white rounded-1.5rem hover:bg-blue-900 transition-all active:scale-90 disabled:opacity-30 shadow-xl shadow-blue-900/20"
               >
                 <Send size={18} />

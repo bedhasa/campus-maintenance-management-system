@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 interface Props {
   id: string;
@@ -37,7 +38,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
     }
   }, [params, data]);
 
-  if (!data) return <p className="text-sm text-slate-500">Loading work order...</p>;
+  if (!data) return <PageSkeleton cards={2} rows={3} />;
 
   return (
     <div className="space-y-6">
@@ -60,4 +61,3 @@ export default function WorkOrderDetailPage({ id }: Props) {
     </div>
   );
 }
-

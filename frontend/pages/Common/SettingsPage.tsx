@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 type SettingsResponse = {
   success: boolean;
@@ -49,7 +50,7 @@ export default function SettingsPage() {
   };
 
   if (error) return <p className="text-sm text-red-600 font-semibold">{error}</p>;
-  if (!settings) return <p className="text-sm text-gray-500">Loading settings...</p>;
+  if (!settings) return <PageSkeleton cards={2} rows={2} />;
 
   return (
     <div className="space-y-6">
@@ -81,4 +82,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

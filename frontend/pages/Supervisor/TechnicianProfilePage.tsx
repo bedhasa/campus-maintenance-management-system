@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 interface Props {
   id: string;
@@ -37,7 +38,7 @@ export default function TechnicianProfilePage({ id }: Props) {
     void run();
   }, [id]);
 
-  if (!data) return <p className="text-sm text-slate-500">Loading technician profile...</p>;
+  if (!data) return <PageSkeleton cards={2} rows={5} />;
 
   return (
     <div className="space-y-6">
@@ -71,4 +72,3 @@ export default function TechnicianProfilePage({ id }: Props) {
     </div>
   );
 }
-

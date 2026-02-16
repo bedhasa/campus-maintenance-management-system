@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiRequest } from "@/lib/api";
+import PageSkeleton from "@/components/PageSkeleton";
 
 type WorkOrder = {
   id: number;
@@ -27,7 +28,7 @@ export default function TechnicianDashboardPage() {
     void run();
   }, []);
 
-  if (!data) return <p className="text-sm text-slate-500">Loading jobs...</p>;
+  if (!data) return <PageSkeleton cards={4} rows={4} />;
 
   return (
     <div className="space-y-6">
@@ -54,4 +55,3 @@ export default function TechnicianDashboardPage() {
     </div>
   );
 }
-
