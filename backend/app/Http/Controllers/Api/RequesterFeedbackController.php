@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\MaintenanceRequest;
 use App\Models\TechnicianRating;
 use App\Models\User;
+use App\Models\UserNotification;
 use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,10 +21,10 @@ class RequesterFeedbackController extends ModuleController
             return $this->forbidden();
         }
 
-        if (!in_array($ticket->status, ['completed', 'closed'], true)) {
+        if ($ticket->status !== 'closed') {
             return response()->json([
                 'success' => false,
-                'message' => 'Rating is allowed only after work completion.',
+                'message' => 'Rating is allowed only after supervisor closure.',
             ], 422);
         }
 
@@ -58,6 +59,16 @@ class RequesterFeedbackController extends ModuleController
             $tech->update([
                 'avg_rating' => round((float) $avg, 2),
                 'total_ratings' => $count,
+            ]);
+
+            UserNotification::create([
+                'user_id' => $tech->id,
+                'recipient_role' => 'technician',
+                'type' => 'technician_feedback_received',
+                'module' => 'work_order',
+                'related_id' => $ticket->id,
+                'message' => "You received a {$validated['rating']}/5 rating for Request #{$ticket->id}.",
+                'is_read' => false,
             ]);
         }
 

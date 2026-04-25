@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useApp } from "@/context/AppContext";
-import { apiRequest, writeAuthUser } from "@/lib/api";
+import { apiRequest, readAuthUser, writeAuthUser } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
 import {
   User,
@@ -68,6 +68,7 @@ export default function ProfilePage() {
     profilePictureUrl: "",
   });
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -107,6 +108,14 @@ export default function ProfilePage() {
     void loadProfile();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
   const fullName = `${form.fname} ${form.lname}`.trim() || currentUser?.name || "User";
   const effectivePicture = form.profilePictureUrl || currentUser?.profilePicture || "";
   const hasChanges =
@@ -123,8 +132,12 @@ export default function ProfilePage() {
     }
     setError(null);
     setSelectedImage(file);
-    const previewUrl = URL.createObjectURL(file);
-    setForm((prev) => ({ ...prev, profilePictureUrl: previewUrl }));
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+    }
+    const newPreviewUrl = URL.createObjectURL(file);
+    setPreviewUrl(newPreviewUrl);
+    setForm((prev) => ({ ...prev, profilePictureUrl: newPreviewUrl }));
   };
 
   const handleSaveProfile = async () => {
@@ -132,20 +145,22 @@ export default function ProfilePage() {
     setError(null);
     try {
       const body = new FormData();
+      body.append("_method", "PUT");
       body.append("username", form.username.trim().toLowerCase());
       body.append("phone", form.phone.trim());
       if (selectedImage) body.append("profile_picture", selectedImage);
 
       const data = await apiRequest<ProfileResponse>(
         "/api/me/profile",
-        { method: "PUT", body },
+        { method: "POST", body },
         true,
       );
 
       const updatedPicture = data.profile.profile_picture_url ?? "";
+      const authUser = readAuthUser<Record<string, unknown>>() ?? {};
       const mergedStoredUser = {
         ...(JSON.parse(localStorage.getItem("user") || "{}") as Record<string, unknown>),
-        ...(JSON.parse(localStorage.getItem("auth_user") || "{}") as Record<string, unknown>),
+        ...authUser,
         fname: data.profile.fname,
         lname: data.profile.lname,
         username: data.profile.username,
@@ -163,6 +178,10 @@ export default function ProfilePage() {
       setForm((prev) => ({ ...prev, profilePictureUrl: updatedPicture, username: data.profile.username, phone: data.profile.phone }));
       setInitialForm((prev) => ({ ...prev, profilePictureUrl: updatedPicture, username: data.profile.username, phone: data.profile.phone }));
       setSelectedImage(null);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        setPreviewUrl(null);
+      }
       setSaveStatus("success");
       setTimeout(() => setSaveStatus("idle"), 2500);
     } catch (err) {

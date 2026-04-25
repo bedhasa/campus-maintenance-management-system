@@ -19,6 +19,9 @@ class User extends Authenticatable
         'university_id_number',
         'dept_id',
         'phone',
+        'otp',
+        'otp_expires_at',
+        'is_verified',
         'profile_picture',
         'avg_rating',
         'total_ratings',
@@ -28,6 +31,12 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'otp',
+    ];
+
+    protected $casts = [
+        'is_verified' => 'boolean',
+        'otp_expires_at' => 'datetime',
     ];
 
     // Relationship: User belongs to Department
@@ -106,5 +115,20 @@ class User extends Authenticatable
     public function activityLogs()
     {
         return $this->hasMany(SystemActivityLog::class, 'user_id');
+    }
+
+    public function partRequestsRecorded()
+    {
+        return $this->hasMany(PartRequest::class, 'recorded_by');
+    }
+
+    public function partRequestsReviewed()
+    {
+        return $this->hasMany(PartRequest::class, 'reviewed_by');
+    }
+
+    public function partIssuesIssued()
+    {
+        return $this->hasMany(PartIssue::class, 'issued_by');
     }
 }

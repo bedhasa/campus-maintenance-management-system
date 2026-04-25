@@ -122,7 +122,19 @@ export default function RoleSelector() {
     }
   };
 
-  const roles = useMemo(() => user?.roles ?? [], [user]);
+  const roles = useMemo(() => {
+    const allRoles = user?.roles ?? [];
+    const roleNames = new Set(allRoles.map((r) => r.name.toLowerCase()));
+
+    if (roleNames.has("supervisor") || roleNames.has("admin")) {
+      return allRoles.filter((r) => {
+        const name = r.name.toLowerCase();
+        return name === "supervisor" || name === "admin";
+      });
+    }
+
+    return allRoles;
+  }, [user]);
   const displayName = (roleName: string) =>
     roleName
       .split(/[\s_-]+/)
@@ -203,6 +215,8 @@ export default function RoleSelector() {
         onClick={async () => {
           try {
             await apiRequest("/api/logout", { method: "POST" }, true);
+          } catch {
+            // Ignore logout API failures and clear local auth regardless.
           } finally {
             clearAuth();
             router.push("/login");
@@ -216,8 +230,9 @@ export default function RoleSelector() {
 
       {/* Footer Branding */}
       <div className="mt-12 text-slate-300 font-bold text-[10px] uppercase tracking-[0.2em]">
-        University CMMS v2.0 • Secured Portal
+        University CMMS v2.0 | Secured Portal
       </div>
     </div>
   );
 }
+

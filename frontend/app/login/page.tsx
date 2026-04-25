@@ -35,10 +35,10 @@ export default function LoginForm() {
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  // Auto-hide error after 8 seconds
+  // Auto-hide error after 5 seconds
   useEffect(() => {
     if (error) {
-      const timer = setTimeout(() => setError(""), 8000);
+      const timer = setTimeout(() => setError(""), 5000);
       return () => clearTimeout(timer);
     }
   }, [error]);
@@ -112,23 +112,36 @@ export default function LoginForm() {
       <div className="w-full max-w-md">
         {/* Header Section */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-900 rounded-2xl shadow-lg mb-4 text-white font-bold text-4xl transform hover:rotate-3 transition-transform">
-            U
-          </div>
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">University CMMS</h1>
+         
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">HU-IoT CMMS</h1>
           <p className="text-slate-500 mt-2 font-medium">Facilities Management Portal</p>
         </div>
 
         {/* Main Card */}
         <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
+        <div className="flex justify-center mt-6">
+    <div className="w-15 h-15 bg-white rounded-2xl shadow-lg overflow-hidden flex items-center justify-center">
+      <img
+        src="/hu_logo.jpg"
+        alt="Hawassa University Logo"
+        className="block w-full h-full object-cover"
+      />
+    </div>
+  </div>
           <div className="p-8">
             <h2 className="text-2xl font-bold text-slate-800 mb-2">Welcome Back</h2>
             <p className="text-slate-500 text-sm mb-8">Enter your credentials to access the system.</p>
+            {error && (
+              <div className="mb-5 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm font-semibold flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
+                <AlertCircle size={18} className="shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
               {/* Email Field */}
               <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700 ml-1">University Email/Usrename</label>
+                <label className="text-sm font-semibold text-slate-700 ml-1">Email/Usrename</label>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 group-focus-within:text-blue-500 transition-colors">
                     <Mail size={18} />
@@ -192,20 +205,14 @@ export default function LoginForm() {
             </form>
 
             {/* Notification Area */}
-            <div className="mt-6 min-h-12.5 transition-all">
-              {error && (
-                <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm font-semibold flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
-                  <AlertCircle size={18} className="shrink-0" />
-                  <span>{error}</span>
-                </div>
-              )}
-              {successMessage && (
+            {successMessage && (
+              <div className="mt-6 transition-all">
                 <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm font-semibold flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
                   <CheckCircle2 size={18} className="shrink-0" />
                   <span>{successMessage}</span>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Footer Links */}
             <div className="mt-4 text-center">
@@ -225,7 +232,8 @@ export default function LoginForm() {
                 Demo Credentials
               </span>
               <code className="text-[10px] text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
-                technician@demo.com | 123456
+                sof123 | 123456
+                requester.demo
               </code>
             </div>
           </div>

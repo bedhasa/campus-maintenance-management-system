@@ -2,18 +2,31 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { readAuthUser } from "@/lib/api";
+import { apiRequest, clearAuth } from "@/lib/api";
 import { normalizeUserRole, roleDashboardPath } from "@/lib/role-routes";
 
 export default function Dashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    const user = readAuthUser<{ active_role?: string | null; roles?: Array<{ name: string }> }>();
-    const roleName = user?.active_role ?? user?.roles?.[0]?.name ?? null;
-    const normalizedRole = normalizeUserRole(roleName);
-    const destination = normalizedRole ? roleDashboardPath(normalizedRole) : "/login";
-    router.replace(destination);
+    const redirectToRoleDashboard = async () => {
+      try {
+        const data = await apiRequest<{ user?: { active_role?: string | null; roles?: Array<{ name?: string }> } }>(
+          "/api/user",
+          { method: "GET" },
+          true
+        );
+        const roleName = data.user?.active_role ?? data.user?.roles?.[0]?.name ?? null;
+        const normalizedRole = normalizeUserRole(roleName);
+        const destination = normalizedRole ? roleDashboardPath(normalizedRole) : "/login";
+        router.replace(destination);
+      } catch {
+        clearAuth();
+        router.replace("/login");
+      }
+    };
+
+    redirectToRoleDashboard();
   }, [router]);
 
   return (

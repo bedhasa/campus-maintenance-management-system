@@ -13,6 +13,7 @@ type NotificationItem = {
   message: string;
   is_read: boolean;
   created_at: string;
+  related_id?: number | null;
   request_id?: number | null;
   request?: { id?: number | null } | null;
   data?: Record<string, unknown> | null;
@@ -69,6 +70,7 @@ const recordValue = (obj: Record<string, unknown> | null | undefined, key: strin
 
 const getRequestId = (item: NotificationItem): number | null => {
   const direct =
+    item.related_id ??
     item.request_id ??
     item.request?.id ??
     toNumber(recordValue(item.data, "request_id")) ??
@@ -217,12 +219,12 @@ export default function RoutePage() {
     const kind = detectKind(item);
     const requestId = getRequestId(item);
 
-    if (kind === "rejection") {
-      setExpandedRejectionId((prev) => (prev === item.id ? null : item.id));
+    if (!requestId) {
+      if (kind === "rejection") {
+        setExpandedRejectionId((prev) => (prev === item.id ? null : item.id));
+      }
       return;
     }
-
-    if (!requestId) return;
 
     setActiveRequestId(requestId);
     setActiveView(kind === "chat" ? "chat" : "info");

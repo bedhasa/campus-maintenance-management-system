@@ -1,8 +1,6 @@
-"use client";
-
 import RequestDetailPage from "../../../../pages/Supervisor/RequestDetailPage";
 
-export default function RoutePage({ params }: { params: { id: string } }) {
-  return <RequestDetailPage id={params.id} />;
+export default async function RoutePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <RequestDetailPage id={id} />;
 }
-

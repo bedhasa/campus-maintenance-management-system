@@ -33,8 +33,9 @@ const statusFromApi = (status: ApiRequestItem['status']): TicketStatus => {
     case 'in_progress':
       return TicketStatus.IN_PROGRESS;
     case 'completed':
-    case 'closed':
       return TicketStatus.COMPLETED;
+    case 'closed':
+      return TicketStatus.CLOSED;
     case 'rejected':
       return TicketStatus.REJECTED;
     default:

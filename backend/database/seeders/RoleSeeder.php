@@ -12,6 +12,7 @@ class RoleSeeder extends Seeder
         $roles = [
             ['name' => 'requester', 'description' => 'Creates and tracks maintenance requests.'],
             ['name' => 'technician', 'description' => 'Handles assigned maintenance work orders.'],
+            ['name' => 'inventory_officer', 'description' => 'Manages spare parts requests, approvals, and stock issues.'],
             ['name' => 'supervisor', 'description' => 'Oversees technicians and approvals.'],
             ['name' => 'admin', 'description' => 'Manages system configuration and users.'],
         ];

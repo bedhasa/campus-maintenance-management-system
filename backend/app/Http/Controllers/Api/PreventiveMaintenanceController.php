@@ -10,6 +10,7 @@ use App\Models\WorkOrder;
 use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class PreventiveMaintenanceController extends ModuleController
 {
@@ -40,6 +41,36 @@ class PreventiveMaintenanceController extends ModuleController
                 ->where('status', 'active')
                 ->whereDate('next_due_date', '<', now()->toDateString())
                 ->count(),
+        ]);
+    }
+
+    public function show(Request $request, int $id): JsonResponse
+    {
+        $this->authorizeRoles($request, ['supervisor', 'admin']);
+
+        $plan = PreventiveMaintenancePlan::query()
+            ->with([
+                'asset:id,name',
+                'category:id,name',
+                'assignee:id,fname,lname,phone,email',
+                'creator:id,fname,lname',
+                'logs' => fn ($q) => $q
+                    ->with([
+                        'workOrder:id,assigned_to,work_status,completed_at,created_at',
+                        'workOrder.assignee:id,fname,lname,phone,email',
+                    ])
+                    ->orderByDesc('created_at'),
+            ])
+            ->findOrFail($id);
+
+        $isOverdue = $plan->status === 'active' && $plan->next_due_date && $plan->next_due_date->isPast();
+
+        return response()->json([
+            'success' => true,
+            'plan' => $plan,
+            'history' => $plan->logs,
+            'is_overdue' => $isOverdue,
+            'overdue_days' => $isOverdue ? $plan->next_due_date->diffInDays(now()) : 0,
         ]);
     }
 
@@ -120,6 +151,25 @@ class PreventiveMaintenanceController extends ModuleController
         ]);
     }
 
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $plan = PreventiveMaintenancePlan::query()->findOrFail($id);
+
+        DB::transaction(function () use ($plan) {
+            $plan->assignments()->delete();
+            $plan->logs()->delete();
+            $plan->delete();
+        });
+
+        ActivityLogger::log($user->id, 'preventive_maintenance', 'delete_plan', $id, "PM plan #{$id} deleted.", $request);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Plan deleted.',
+        ]);
+    }
+
     public function triggerDue(Request $request): JsonResponse
     {
         $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
@@ -187,4 +237,3 @@ class PreventiveMaintenanceController extends ModuleController
         ]);
     }
 }
-

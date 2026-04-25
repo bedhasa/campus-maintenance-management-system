@@ -19,12 +19,24 @@ class WorkOrder extends Model
         'estimated_hours',
         'work_status',
         'completion_note',
+        'problem_found',
+        'action_taken',
         'delay_reason',
+        'started_at',
+        'paused_at',
+        'resumed_at',
+        'status_updated_at',
+        'completed_by_technician_at',
         'completed_at',
     ];
 
     protected $casts = [
         'scheduled_date' => 'date',
+        'started_at' => 'datetime',
+        'paused_at' => 'datetime',
+        'resumed_at' => 'datetime',
+        'status_updated_at' => 'datetime',
+        'completed_by_technician_at' => 'datetime',
         'completed_at' => 'datetime',
     ];
 
@@ -52,5 +64,9 @@ class WorkOrder extends Model
     {
         return $this->hasMany(PreventiveMaintenanceLog::class, 'work_order_id');
     }
-}
 
+    public function statusLogs()
+    {
+        return $this->hasMany(WorkOrderStatusLog::class, 'work_order_id');
+    }
+}

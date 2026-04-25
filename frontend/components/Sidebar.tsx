@@ -71,8 +71,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
           { name: 'Requests', path: '/supervisor/requests', icon: <ClipboardList size={18} />, tooltip: "Review approvals" },
           { name: t('workOrders'), path: '/supervisor/work-orders', icon: <ListTodo size={18} />, tooltip: "Track work execution" },
           { name: 'Technicians', path: '/supervisor/technicians', icon: <Users size={18} />, tooltip: "Manage maintenance staff" },
-          { name: 'Manual WO', path: '/supervisor/work-orders/create', icon: <FilePlus size={18} />, tooltip: "Create manual orders" },
-          { name: t('maintenance'), path: '/supervisor/preventive', icon: <Calendar size={18} />, tooltip: "Scheduled checks" },
+          { name: 'Maintenance Center', path: '/supervisor/maintenance-center', icon: <Calendar size={18} />, tooltip: "Manual WO and PM in one page" },
           { name: t('analytics'), path: '/supervisor/analytics', icon: <Activity size={18} />, tooltip: "Charts & KPIs" },
           { name: 'Reports', path: '/supervisor/reports', icon: <History size={18} />, tooltip: "Export and print reports" },
         );
@@ -85,14 +84,20 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
         break;
       case 'technician':
         base.push(
-          { name: t('tasks'), path: '/technician/dashboard', icon: <ListTodo size={18} />, tooltip: "Active jobs" },
-          { name: t('completedTasks'), path: '/technician/history', icon: <History size={18} />, tooltip: "Resolution archive" },
+          { name: 'Dashboard', path: '/technician/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Task summary" },
+          { name: 'My Tasks', path: '/technician/tasks', icon: <ClipboardList size={18} />, tooltip: "Assigned jobs" },
+          { name: 'In Progress', path: '/technician/in-progress', icon: <Activity size={18} />, tooltip: "Active work" },
+          { name: 'Completed', path: '/technician/completed', icon: <History size={18} />, tooltip: "Finished work" },
+          { name: 'Delayed Tasks', path: '/technician/delayed', icon: <Calendar size={18} />, tooltip: "Overdue and delayed jobs" },
         );
         break;
       case 'inventory_officer':
         base.push(
           { name: t('dashboard'), path: '/inventory/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Stock summary" },
-          { name: t('stockList'), path: '/inventory/list', icon: <Package size={18} />, tooltip: "Manage parts" },
+          { name: 'Spare Parts Management', path: '/inventory/list', icon: <Package size={18} />, tooltip: "Manage parts and stock" },
+          { name: 'Record Requests', path: '/inventory/record-request', icon: <FilePlus size={18} />, tooltip: "Capture technician demand" },
+          { name: 'Issue History', path: '/inventory/issue-history', icon: <History size={18} />, tooltip: "Issued stock records" },
+          { name: 'Reports', path: '/inventory/reports', icon: <Activity size={18} />, tooltip: "Demand and usage reports" },
         );
         break;
       case 'admin':
@@ -115,7 +120,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
     });
 
     base.push({
-      name: t('help'),
+      name: role === 'inventory_officer' ? 'Help & Support' : t('help'),
       path: `${basePath}/help`,
       icon: <HelpCircle size={18} />,
       tooltip: "System guide"

@@ -27,5 +27,14 @@ class SparePart extends Model
     {
         return $this->hasMany(WorkOrderSparePart::class, 'spare_part_id');
     }
-}
 
+    public function partRequests()
+    {
+        return $this->hasMany(PartRequest::class, 'part_id');
+    }
+
+    public function partIssues()
+    {
+        return $this->hasMany(PartIssue::class, 'part_id');
+    }
+}

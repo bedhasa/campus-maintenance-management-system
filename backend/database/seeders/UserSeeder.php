@@ -19,6 +19,7 @@ class UserSeeder extends Seeder
 
         $roleRequester = Role::where('name', 'requester')->first();
         $roleTechnician = Role::where('name', 'technician')->first();
+        $roleInventoryOfficer = Role::where('name', 'inventory_officer')->first();
         $roleSupervisor = Role::where('name', 'supervisor')->first();
         $roleAdmin = Role::where('name', 'admin')->first();
 
@@ -44,6 +45,17 @@ class UserSeeder extends Seeder
                 'dept_id' => $departments->first()->id,
                 'phone' => '555-100-1002',
                 'roles' => [$roleTechnician],
+            ],
+            [
+                'fname' => 'Bdio',
+                'lname' => 'Inventory',
+                'username' => 'bdio',
+                'email' => 'bdio@demo.com',
+                'password' => Hash::make('123456'),
+                'university_id_number' => 'U1001006',
+                'dept_id' => $departments->first()->id,
+                'phone' => '555-100-1006',
+                'roles' => [$roleInventoryOfficer],
             ],
             [
                 'fname' => 'Sofia',
@@ -94,8 +106,8 @@ class UserSeeder extends Seeder
             ->count(12)
             ->state(fn () => ['dept_id' => $departments->random()->id])
             ->create()
-            ->each(function (User $user) use ($roleRequester, $roleTechnician, $roleSupervisor, $roleAdmin) {
-                $roles = collect([$roleRequester, $roleTechnician, $roleSupervisor, $roleAdmin])
+            ->each(function (User $user) use ($roleRequester, $roleTechnician, $roleInventoryOfficer, $roleSupervisor, $roleAdmin) {
+                $roles = collect([$roleRequester, $roleTechnician, $roleInventoryOfficer, $roleSupervisor, $roleAdmin])
                     ->filter()
                     ->random(rand(1, 2))
                     ->pluck('id')

@@ -49,6 +49,7 @@ type TechnicianOption = {
 
 const statusColors: Record<string, string> = {
   submitted: "bg-amber-500", approved: "bg-cyan-600", assigned: "bg-blue-600",
+  in_progress: "bg-orange-500",
   completed: "bg-emerald-600", closed: "bg-slate-900", rejected: "bg-rose-600",
 };
 
@@ -65,9 +66,12 @@ export default function RequestDetailPage({ id }: Props) {
   const [assignLoading, setAssignLoading] = useState(false);
   const [technicians, setTechnicians] = useState<TechnicianOption[]>([]);
   const [selectedTechId, setSelectedTechId] = useState("");
+  const [techSearch, setTechSearch] = useState("");
   const [scheduledDate, setScheduledDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -98,6 +102,39 @@ export default function RequestDetailPage({ id }: Props) {
   const latestWorkOrder = useMemo(() => (detail?.work_orders ?? [])[0], [detail?.work_orders]);
   const assignee = latestWorkOrder?.assignee ?? null;
   const isAssigned = Boolean(assignee);
+  const filteredTechnicians = useMemo(() => {
+    const query = techSearch.trim().toLowerCase();
+    const matched = !query ? technicians : technicians.filter((tech) => {
+      const fullName = `${tech.fname ?? ""} ${tech.lname ?? ""}`.trim().toLowerCase();
+      const phone = (tech.phone ?? "").toLowerCase();
+      const email = (tech.email ?? "").toLowerCase();
+      const specialties = (tech.specialties ?? []).map((s) => s.name ?? "").join(" ").toLowerCase();
+      return fullName.includes(query) || phone.includes(query) || email.includes(query) || specialties.includes(query);
+    });
+    return [...matched].sort((a, b) => Number(a.open_workload ?? 0) - Number(b.open_workload ?? 0));
+  }, [techSearch, technicians]);
+
+  const getTechnicianState = (tech: TechnicianOption) => {
+    const workload = Number(tech.open_workload ?? 0);
+    if (workload === 0) {
+      return {
+        label: "Free",
+        badgeClass: "bg-emerald-100 text-emerald-700",
+      };
+    }
+
+    if (tech.availability === false) {
+      return {
+        label: "Busy",
+        badgeClass: "bg-amber-100 text-amber-700",
+      };
+    }
+
+    return {
+      label: `${workload} active`,
+      badgeClass: "bg-blue-100 text-blue-700",
+    };
+  };
 
   const timelineEvents = useMemo(() => {
     if (!detail) return [];
@@ -147,11 +184,27 @@ export default function RequestDetailPage({ id }: Props) {
   };
 
   const review = async (action: "approve" | "reject") => {
-    await apiRequest(`/api/supervisor/requests/${id}/review`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    }, true);
-    await load();
+    const comment = action === "reject"
+      ? window.prompt("Enter the rejection reason for the requester:")
+      : undefined;
+
+    if (action === "reject" && !comment?.trim()) {
+      setAssignError("A rejection reason is required.");
+      return;
+    }
+
+    try {
+      setReviewing(true);
+      setAssignError(null);
+      await apiRequest(`/api/supervisor/requests/${id}/review`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, comment: comment?.trim() || undefined }),
+      }, true);
+      await load();
+    } finally {
+      setReviewing(false);
+    }
   };
 
   const openAssign = async () => {
@@ -164,18 +217,16 @@ export default function RequestDetailPage({ id }: Props) {
     try {
       setAssignLoading(true);
       setAssignError(null);
-      // Use stable PM technician list and filter by specialty category locally.
       const all = await apiRequest<{ success: boolean; technicians: TechnicianOption[] }>(
-        "/api/pm/technicians",
+        `/api/supervisor/technicians/by-category?category_id=${resolvedCategoryId}`,
         { method: "GET" },
         true
       );
-      const techs = (all.technicians ?? []).filter((t) =>
-        (t.specialties ?? []).some((s) => Number(s.category_id) === Number(resolvedCategoryId))
-      );
+      const techs = all.technicians ?? [];
 
       setTechnicians(techs);
       setSelectedTechId(techs[0]?.id ? String(techs[0].id) : "");
+      setTechSearch("");
       if (techs.length === 0) setAssignError("No technicians found for this category.");
       setAssignOpen(true);
     } catch (error) {
@@ -212,14 +263,27 @@ export default function RequestDetailPage({ id }: Props) {
     }
   };
 
+  const updateLifecycle = async (action: "close" | "reopen") => {
+    try {
+      setLifecycleBusy(true);
+      setAssignError(null);
+      await apiRequest(`/api/supervisor/requests/${id}/${action}`, { method: "PATCH" }, true);
+      await load();
+    } catch (error) {
+      setAssignError(error instanceof Error ? error.message : `Failed to ${action} request.`);
+    } finally {
+      setLifecycleBusy(false);
+    }
+  };
+
   if (!detail) return <div className="h-screen flex items-center justify-center font-black text-slate-400 animate-pulse">LOADING...</div>;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="max-w-6xl mx-auto space-y-4 animate-in fade-in duration-300">
       
       {/* SECTION 1: TOP HEADER & CONTROLS */}
-      <div className="bg-white rounded-[2rem] border border-slate-100 p-8 shadow-sm">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      <div className="bg-white rounded-[1.75rem] border border-slate-100 p-5 md:p-6 shadow-sm">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className={`px-4 py-1 rounded-full text-[9px] font-black text-white uppercase tracking-[0.2em] ${statusColors[detail.status]}`}>
@@ -229,7 +293,7 @@ export default function RequestDetailPage({ id }: Props) {
                 <Hash size={12}/> {detail.id}
               </span>
             </div>
-            <h1 className="text-3xl font-black text-slate-900 leading-tight">{detail.title}</h1>
+            <h1 className="text-2xl md:text-3xl font-black text-slate-900 leading-tight">{detail.title}</h1>
           </div>
 
           {/* Navigation & Action Mix */}
@@ -250,20 +314,20 @@ export default function RequestDetailPage({ id }: Props) {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-6">
+      <div className="grid xl:grid-cols-12 gap-4">
         
         {/* SECTION 2: CONTENT AREA (Dynamic based on Tab) */}
-        <div className="lg:col-span-8">
+        <div className="xl:col-span-8">
           {activeTab === "details" ? (
-            <div className="space-y-6 animate-in slide-in-from-left-4 duration-300">
+            <div className="space-y-4 animate-in slide-in-from-left-4 duration-300">
               
               {/* PRIMARY DETAILS */}
-              <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm">
+              <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6 flex items-center gap-2">
                   <Layers size={16} /> Technical Specs
                 </h3>
                 <div className="grid sm:grid-cols-2 gap-4">
-                  <div className="p-5 rounded-3xl bg-slate-50/50 border border-slate-100 sm:col-span-2">
+                  <div className="p-4 rounded-3xl bg-slate-50/50 border border-slate-100 sm:col-span-2">
                     <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-3 flex items-center gap-2">
                       <MapPin size={12}/> Location
                     </p>
@@ -277,13 +341,13 @@ export default function RequestDetailPage({ id }: Props) {
                       </p>
                     )}
                   </div>
-                  <div className="p-5 rounded-3xl bg-slate-50/50 border border-slate-100">
+                  <div className="p-4 rounded-3xl bg-slate-50/50 border border-slate-100">
                     <p className="text-[9px] font-black text-purple-500 uppercase tracking-widest mb-3 flex items-center gap-2">
                       <Tag size={12}/> Category
                     </p>
                     <p className="text-sm font-black text-slate-800">{detail.category?.name || "General"}</p>
                   </div>
-                  <div className="p-5 rounded-3xl bg-slate-50/50 border border-slate-100">
+                  <div className="p-4 rounded-3xl bg-slate-50/50 border border-slate-100">
                     <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest mb-3 flex items-center gap-2">
                       <Box size={12}/> Linked Asset
                     </p>
@@ -291,14 +355,14 @@ export default function RequestDetailPage({ id }: Props) {
                   </div>
                 </div>
 
-                <div className="mt-8 space-y-3">
+                <div className="mt-6 space-y-3">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Problem Description</p>
-                  <p className="text-sm text-slate-700 leading-relaxed bg-white border border-slate-100 p-6 rounded-3xl whitespace-pre-wrap">{detail.description}</p>
+                  <p className="text-sm text-slate-700 leading-relaxed bg-white border border-slate-100 p-4 rounded-3xl whitespace-pre-wrap">{detail.description}</p>
                 </div>
               </div>
 
               {/* IMAGES */}
-              <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm">
+              <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6 flex items-center gap-2">
                   <MessageSquare size={16} /> Visual Attachments
                 </h3>
@@ -314,35 +378,52 @@ export default function RequestDetailPage({ id }: Props) {
             </div>
           ) : (
             /* CHAT SECTION */
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col h-[700px] overflow-hidden animate-in slide-in-from-right-4 duration-300">
-              <div ref={chatRef} className="flex-1 overflow-y-auto p-8 space-y-6 bg-slate-50/20">
+            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm flex flex-col min-h-[520px] max-h-[72vh] overflow-hidden animate-in slide-in-from-right-4 duration-300">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Request Conversation</h3>
+                  <p className="text-xs text-slate-500">Keep updates on this request in one place.</p>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                  {(detail.messages ?? []).length} messages
+                </span>
+              </div>
+              <div ref={chatRef} className="flex-1 overflow-y-auto px-4 py-4 md:px-5 space-y-4 bg-slate-50/30">
                 {detail.messages?.map((m) => {
                   const isMe = m.sender?.id === currentUserId;
                   return (
                     <div key={m.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[80%] ${isMe ? "items-end text-right" : "items-start text-left"}`}>
+                      <div className={`max-w-[88%] ${isMe ? "items-end text-right" : "items-start text-left"}`}>
                         <div className="flex items-center gap-2 mb-1 px-2">
                           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{m.sender?.fname}</span>
                           <span className="text-[8px] font-bold text-slate-300">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        <div className={`px-5 py-3 rounded-2xl text-sm shadow-sm ${isMe ? "bg-[#003366] text-white rounded-tr-none" : "bg-white text-slate-700 border border-slate-100 rounded-tl-none"}`}>
+                        <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${isMe ? "bg-[#003366] text-white rounded-tr-none" : "bg-white text-slate-700 border border-slate-100 rounded-tl-none"}`}>
                           {m.message}
                         </div>
                       </div>
                     </div>
                   );
                 })}
+                {(!detail.messages || detail.messages.length === 0) && (
+                  <div className="flex h-full min-h-[240px] items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-white/70 p-6 text-center">
+                    <div>
+                      <p className="text-sm font-black text-slate-700">No messages yet</p>
+                      <p className="text-xs text-slate-500 mt-1">Start the conversation with the requester here.</p>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="p-6 bg-white border-t border-slate-50">
+              <div className="p-4 bg-white border-t border-slate-100">
                 <div className="relative group">
                   <textarea 
                     value={newMessage} 
                     onChange={(e) => setNewMessage(e.target.value)}
                     disabled={chatLocked}
                     placeholder={chatLocked ? "Thread Locked" : "Type your message..."} 
-                    className="w-full bg-slate-50 border-none rounded-[1.5rem] p-4 pr-14 text-sm min-h-[80px] focus:ring-2 focus:ring-[#003366]/5 outline-none resize-none"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-[1.25rem] p-4 pr-14 text-sm min-h-[68px] max-h-36 focus:ring-2 focus:ring-[#003366]/10 focus:border-[#003366]/30 outline-none resize-none text-slate-900 placeholder:text-slate-400"
                   />
-                  <button onClick={sendMessage} disabled={chatLocked} className="absolute bottom-4 right-4 p-3 bg-[#003366] text-white rounded-xl shadow-lg hover:scale-110 active:scale-95 transition-transform disabled:opacity-20">
+                  <button onClick={sendMessage} disabled={chatLocked || !newMessage.trim()} className="absolute bottom-3 right-3 p-3 bg-[#003366] text-white rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-transform disabled:opacity-30">
                     <Send size={18} />
                   </button>
                 </div>
@@ -352,24 +433,34 @@ export default function RequestDetailPage({ id }: Props) {
         </div>
 
         {/* SECTION 3: SIDEBAR (Persistent Info) */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="xl:col-span-4 space-y-4">
           
           {/* Action Hub */}
-          <div className="bg-[#003366] rounded-[2.5rem] p-8 text-white shadow-xl shadow-blue-900/20">
+          <div className="bg-[#003366] rounded-[2rem] p-5 md:p-6 text-white shadow-xl shadow-blue-900/20">
             <h3 className="text-[10px] font-black uppercase tracking-widest mb-6 opacity-60 flex items-center gap-2">
               <ShieldCheck size={16}/> Management Hub
             </h3>
             <div className="space-y-3">
               {detail.status === "submitted" && (
                 <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => review("approve")} className="bg-emerald-500 hover:bg-emerald-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40">Approve</button>
-                  <button onClick={() => review("reject")} className="bg-rose-500 hover:bg-rose-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-rose-900/40">Reject</button>
+                  <button disabled={reviewing} onClick={() => review("approve")} className="bg-emerald-500 hover:bg-emerald-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50">Approve</button>
+                  <button disabled={reviewing} onClick={() => review("reject")} className="bg-rose-500 hover:bg-rose-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-rose-900/40 disabled:opacity-50">Reject</button>
                 </div>
               )}
               {!isAssigned && detail.status === "approved" && (
-                <button onClick={openAssign} className="w-full bg-white text-[#003366] py-3 rounded-2xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2">
+                <button onClick={openAssign} className="w-full bg-white text-[#003366] py-3 rounded-2xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2 hover:bg-blue-50">
                   <HardHat size={14}/> Assign Technician
                 </button>
+              )}
+              {detail.status === "completed" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <button disabled={lifecycleBusy} onClick={() => updateLifecycle("close")} className="bg-emerald-500 hover:bg-emerald-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50">
+                    Close Request
+                  </button>
+                  <button disabled={lifecycleBusy} onClick={() => updateLifecycle("reopen")} className="bg-amber-500 hover:bg-amber-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-amber-900/30 disabled:opacity-50">
+                    Reopen Task
+                  </button>
+                </div>
               )}
               {isAssigned && (
                 <div className="rounded-2xl bg-white/10 p-4 border border-white/10">
@@ -378,6 +469,9 @@ export default function RequestDetailPage({ id }: Props) {
                   <p className="text-[11px] text-blue-100">{assignee?.phone || "-"}</p>
                   <p className="text-[11px] text-blue-100 break-all">{assignee?.email || "-"}</p>
                 </div>
+              )}
+              {assignError && (
+                <p className="text-xs font-bold text-rose-200">{assignError}</p>
               )}
               <div className="pt-4 border-t border-white/10 mt-4">
                 <div className="flex justify-between items-center text-[10px] font-black uppercase opacity-60">
@@ -389,11 +483,11 @@ export default function RequestDetailPage({ id }: Props) {
           </div>
 
           {/* Requester Contact */}
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm">
+          <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
               <User size={16}/> Requester
             </h3>
-            <div className="flex items-center gap-4 mb-6">
+            <div className="flex items-center gap-4 mb-5">
               <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-lg font-black text-[#003366]">
                 {detail.requester?.profile_picture_url ? (
                   <img src={detail.requester.profile_picture_url} alt="Requester" className="w-full h-full object-cover rounded-2xl" />
@@ -415,7 +509,7 @@ export default function RequestDetailPage({ id }: Props) {
           </div>
 
           {isAssigned && (
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm">
+            <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
               <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
                 <HardHat size={16}/> Assigned Technician
               </h3>
@@ -442,7 +536,7 @@ export default function RequestDetailPage({ id }: Props) {
           )}
 
           {/* Mini Logs */}
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm">
+          <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
             <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
               <Clock size={16}/> Timeline
             </h3>
@@ -471,7 +565,7 @@ export default function RequestDetailPage({ id }: Props) {
 
       {assignOpen && (
         <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl">
+          <div className="w-full max-w-2xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-black text-slate-900">Assign Technician</h3>
               <button onClick={() => setAssignOpen(false)} className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
@@ -479,28 +573,69 @@ export default function RequestDetailPage({ id }: Props) {
               </button>
             </div>
 
-            <p className="text-xs font-bold text-slate-500">Category: {detail.category?.name ?? "General"}</p>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Category Match</p>
+              <p className="mt-1 text-sm font-semibold text-slate-700">{detail.category?.name ?? "General"}</p>
+              <p className="mt-1 text-xs text-slate-500">Choose the technician who best fits this request. Matching staff are listed below.</p>
+            </div>
 
             {assignLoading ? (
               <p className="text-sm text-slate-500">Loading technicians...</p>
             ) : (
               <>
-                <select
-                  value={selectedTechId}
-                  onChange={(e) => setSelectedTechId(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-3 text-sm"
-                >
-                  <option value="">Choose technician...</option>
-                  {technicians.map((t) => (
-                    <option key={t.id} value={String(t.id)}>
-                      {`${t.fname ?? ""} ${t.lname ?? ""}`.trim()} | load: {t.open_workload ?? 0} | {t.availability ? "available" : "busy"}
-                    </option>
-                  ))}
-                </select>
+                <div className="space-y-3">
+                  <input
+                    value={techSearch}
+                    onChange={(e) => setTechSearch(e.target.value)}
+                    placeholder="Search technician by name"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#003366]/30 focus:ring-2 focus:ring-[#003366]/10 outline-none"
+                  />
+                  <div className="max-h-72 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
+                    {filteredTechnicians.map((t) => {
+                      const isSelected = selectedTechId === String(t.id);
+                      const fullName = `${t.fname ?? ""} ${t.lname ?? ""}`.trim() || "Unnamed technician";
+                      const techState = getTechnicianState(t);
+                      const workload = Number(t.open_workload ?? 0);
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => setSelectedTechId(String(t.id))}
+                          className={`w-full rounded-2xl border p-4 text-left transition-all ${
+                            isSelected
+                              ? "border-[#003366] bg-blue-50 shadow-sm"
+                              : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/60"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-black text-slate-900">{fullName}</p>
+                              <p className="mt-1 text-xs text-slate-500">{t.phone || t.email || "No contact info"}</p>
+                            </div>
+                            <div className="shrink-0 flex items-center gap-2">
+                              <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${techState.badgeClass}`}>
+                                {techState.label}
+                              </span>
+                              <span className="text-[11px] font-bold text-slate-500">
+                                {workload} jobs
+                              </span>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                    {filteredTechnicians.length === 0 && (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center">
+                        <p className="text-sm font-black text-slate-700">No technician found</p>
+                        <p className="mt-1 text-xs text-slate-500">Try a different search term or review technician specialties.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm" />
-                  <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm" />
+                  <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
                 </div>
               </>
             )}

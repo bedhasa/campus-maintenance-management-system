@@ -18,6 +18,7 @@ import {
 } from "./constants";
 import { translations, Language } from "./translations";
 import { normalizeUserRole } from "./lib/role-routes";
+import { clearAuth, readAuthToken, readAuthUser } from "./lib/api";
 
 export interface Notification {
   id: string;
@@ -153,11 +154,18 @@ const safeParse = (raw: string | null): unknown => {
 
 const resolveStoredUser = (): User | null => {
   if (typeof window === "undefined") return null;
+  const token = readAuthToken();
+  if (!token) {
+    localStorage.removeItem("user");
+    localStorage.removeItem("auth_user");
+    sessionStorage.removeItem("auth_user");
+    return null;
+  }
 
   const savedUser = localStorage.getItem("user");
-  const savedAuthUser = localStorage.getItem("auth_user");
+  const savedAuthUser = readAuthUser();
 
-  const parsedAuthUser = mapStoredUser(safeParse(savedAuthUser));
+  const parsedAuthUser = mapStoredUser(savedAuthUser);
   if (parsedAuthUser) {
     localStorage.setItem("user", JSON.stringify(parsedAuthUser));
     return parsedAuthUser;
@@ -206,10 +214,12 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     syncCurrentUser();
     window.addEventListener("storage", syncCurrentUser);
     window.addEventListener("auth-user-updated", syncCurrentUser);
+    window.addEventListener("auth-state-changed", syncCurrentUser);
 
     return () => {
       window.removeEventListener("storage", syncCurrentUser);
       window.removeEventListener("auth-user-updated", syncCurrentUser);
+      window.removeEventListener("auth-state-changed", syncCurrentUser);
     };
   }, []);
 
@@ -228,7 +238,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
 
   const logout = () => {
     setCurrentUser(null);
-    localStorage.removeItem("user");
+    clearAuth();
   };
 
   const addNotification = (

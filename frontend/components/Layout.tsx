@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect } from 'react';
-import { Bell, User as UserIcon, Menu, CirclePlus, Settings, LogOut, Search, Globe, FilePlus, LayoutDashboard, Wrench } from 'lucide-react';
-import { Link, useLocation, useNavigate } from '../lib/router-dom-shim';
+import React, { useState } from 'react';
+import { Bell, User as UserIcon, Menu, LogOut, LayoutDashboard, ClipboardList, History, HelpCircle, FilePlus } from 'lucide-react';
+import { Link, NavLink, useLocation, useNavigate } from '../lib/router-dom-shim';
 import Sidebar from './Sidebar';
 import { User } from '../types';
 import { useApp } from '../App';
@@ -17,13 +17,13 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { notifications, language, setLanguage, t, viewedRequestId, setViewedRequestId, requests } = useApp();
+  const { notifications, t, viewedRequestId, setViewedRequestId, requests } = useApp();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [showLangMenu, setShowLangMenu] = useState(false);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const basePath = roleToBasePath(user.role);
   
   const isRequester = user.role === 'requester';
+  const isTechnician = user.role === 'technician';
 
   // Filter notifications for this specific user
   const relevantNotifications = notifications.filter(n => {
@@ -48,33 +48,37 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
       )}
 
       {/* Mobile Backdrop */}
-      {isSidebarOpen && (
+      {!isTechnician && !isRequester && isSidebarOpen && (
         <div 
           className="fixed inset-0 bg-black/50 z-40 lg:hidden transition-opacity duration-300 animate-in fade-in"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      <Sidebar 
-        role={user.role} 
-        onLogout={onLogout} 
-        isOpen={isSidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
+      {!isTechnician && !isRequester && (
+        <Sidebar 
+          role={user.role} 
+          onLogout={onLogout} 
+          isOpen={isSidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+      )}
       
       <div className="flex-1 flex flex-col min-w-0 bg-[#F9FAFB] overflow-hidden relative">
         {/* Top Navbar */}
         <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 shrink-0 z-30 shadow-sm">
           <div className="flex items-center space-x-4">
-            <button 
-              onClick={() => setSidebarOpen(true)}
-              className="group relative lg:hidden text-gray-500 p-2 hover:bg-gray-100 rounded-xl transition-all"
-            >
-              <Menu size={20} />
-              <span className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-2 py-1 rounded bg-gray-900 text-white text-[10px] font-bold opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none whitespace-nowrap z-1000">
-                Open menu
-              </span>
-            </button>
+            {!isTechnician && !isRequester && (
+              <button 
+                onClick={() => setSidebarOpen(true)}
+                className="group relative lg:hidden text-gray-500 p-2 hover:bg-gray-100 rounded-xl transition-all"
+              >
+                <Menu size={20} />
+                <span className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-2 py-1 rounded bg-gray-900 text-white text-[10px] font-bold opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none whitespace-nowrap z-1000">
+                  Open menu
+                </span>
+              </button>
+            )}
             <div className="hidden md:block">
               <h2 className="text-sm font-black text-gray-900 leading-none mb-0.5">
                 {user.name}
@@ -102,8 +106,13 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
                 onClick={() => setShowProfileMenu(!showProfileMenu)}
                 className="group relative flex items-center space-x-2 active:scale-95 transition-all"
               >
-                <div className="h-9 w-9 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100 text-xs font-black shadow-sm group-hover:bg-blue-100">
-                  {user.name.charAt(0)}
+                <div className="h-9 w-9 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 border border-blue-100 text-xs font-black shadow-sm group-hover:bg-blue-100 overflow-hidden">
+                  {user.profilePicture ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={user.profilePicture} alt={user.name} className="w-full h-full object-cover" />
+                  ) : (
+                    user.name.charAt(0)
+                  )}
                 </div>
                 <span className="absolute left-1/2 -translate-x-1/2 top-full mt-2 px-2 py-1 rounded bg-gray-900 text-white text-[10px] font-bold opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none whitespace-nowrap z-1000">
                   Profile menu
@@ -142,21 +151,71 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6 md:p-8">
+        <main className={`flex-1 overflow-y-auto p-6 md:p-8 ${isTechnician || isRequester ? 'pb-24 md:pb-8' : ''}`}>
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
         </main>
 
-        {/* STICKY FAB for Requesters */}
+        {isTechnician && (
+          <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(15,23,42,0.08)]">
+            <div className="mx-auto grid max-w-2xl grid-cols-2 gap-2 px-3 py-3">
+              <Link
+                to={`${basePath}/dashboard`}
+                className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-600 active:scale-[0.98]"
+              >
+                <LayoutDashboard size={18} />
+                <span>Dashboard</span>
+              </Link>
+              <Link
+                to={`${basePath}/tasks`}
+                className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-[#003366] px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] text-white active:scale-[0.98]"
+              >
+                <ClipboardList size={18} />
+                <span>My Tasks</span>
+              </Link>
+            </div>
+          </footer>
+        )}
+
+        {isRequester && (
+          <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(15,23,42,0.08)] lg:hidden">
+            <div className="mx-auto grid max-w-2xl grid-cols-3 gap-2 px-3 py-3">
+              <NavLink
+                to="/requester/dashboard"
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
+              >
+                <LayoutDashboard size={18} />
+                <span>Dashboard</span>
+              </NavLink>
+              <NavLink
+                to="/requester/history"
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
+              >
+                <History size={18} />
+                <span>Track Issue</span>
+              </NavLink>
+              <NavLink
+                to="/requester/profile"
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
+              >
+                <HelpCircle size={18} />
+                <span>Help &amp; Support</span>
+              </NavLink>
+            </div>
+          </footer>
+        )}
+
         {isRequester && location.pathname !== '/requester/submit' && (
-          <div className="fixed bottom-8 right-8 z-40">
-            <Link 
+          <div className="fixed bottom-24 right-4 z-50 lg:hidden">
+            <Link
               to="/requester/submit"
-              className="group flex items-center space-x-3 bg-[#003366] text-white px-6 py-4 rounded-4xl shadow-2xl hover:bg-blue-900 hover:scale-105 active:scale-95 transition-all"
+              className="group flex items-center gap-3 rounded-full bg-[#003366] px-4 py-3 text-white shadow-2xl shadow-slate-900/25 transition-transform active:scale-95"
             >
-              <FilePlus size={24} />
-              <span className="text-xs font-black uppercase tracking-widest max-w-0 overflow-hidden group-hover:max-w-30 transition-all duration-500 whitespace-nowrap">Report Issue</span>
+              <FilePlus size={22} />
+              <span className="max-w-0 overflow-hidden text-[11px] font-black uppercase tracking-[0.18em] transition-all duration-300 group-hover:max-w-28">
+                Report Issue
+              </span>
             </Link>
           </div>
         )}

@@ -97,6 +97,7 @@ const SubmitRequest: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -114,6 +115,10 @@ const SubmitRequest: React.FC = () => {
 
   const [images, setImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const isMobileDevice = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  }, []);
   const [formData, setFormData] = useState<RequestFormInputs>({
     title: "",
     building: "",
@@ -599,13 +604,24 @@ const SubmitRequest: React.FC = () => {
                   </div>
                 ))}
                 {images.length < 3 && (
-                  <button type="button" onClick={() => fileInputRef.current?.click()} className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isMobileDevice) {
+                        cameraInputRef.current?.click();
+                        return;
+                      }
+                      fileInputRef.current?.click();
+                    }}
+                    className="aspect-square rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:text-blue-600 hover:border-blue-600 hover:bg-blue-50 transition-all gap-2"
+                  >
                     <Camera size={24} />
                     <span className="text-[9px] font-black uppercase tracking-widest">Add Photo</span>
                   </button>
                 )}
               </div>
               <input type="file" ref={fileInputRef} onChange={handleImageChange} className="hidden" accept="image/*" multiple />
+              <input type="file" ref={cameraInputRef} onChange={handleImageChange} className="hidden" accept="image/*" capture="environment" />
             </div>
 
             <div className="pt-4 flex gap-4">

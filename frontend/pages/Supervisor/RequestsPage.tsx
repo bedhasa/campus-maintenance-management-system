@@ -22,6 +22,8 @@ export default function SupervisorRequestsPage() {
   const params = useSearchParams();
   const router = useRouter();
   const [items, setItems] = useState<RequestItem[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [approvedUnassignedCount, setApprovedUnassignedCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const activeStatus = params?.get("status") || "all";
@@ -45,12 +47,26 @@ export default function SupervisorRequestsPage() {
     setLoading(true);
     const status = params?.get("status");
     const suffix = status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "";
-    const data = await apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
-      `/api/supervisor/requests${suffix}`, 
-      { method: "GET" }, 
-      true
-    );
+    const [data, dashboard, approvedData] = await Promise.all([
+      apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
+        `/api/supervisor/requests${suffix}`,
+        { method: "GET" },
+        true
+      ),
+      apiRequest<{ success: boolean; summary: { new_requests: number } }>(
+        "/api/supervisor/dashboard",
+        { method: "GET" },
+        true
+      ),
+      apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
+        "/api/supervisor/requests?status=approved",
+        { method: "GET" },
+        true
+      ),
+    ]);
     setItems(data.requests.data ?? []);
+    setPendingCount(Number(dashboard.summary?.new_requests ?? 0));
+    setApprovedUnassignedCount((approvedData.requests.data ?? []).length);
     setLoading(false);
   }, [params]);
 
@@ -96,7 +112,19 @@ export default function SupervisorRequestsPage() {
               activeStatus === f.value ? "bg-white text-[#003366] shadow-sm" : "text-slate-500 hover:text-slate-700"
             }`}
           >
-            {f.label}
+            <span className="inline-flex items-center gap-2">
+              {f.label}
+              {f.value === "submitted" && pendingCount > 0 ? (
+                <span className="inline-flex min-w-[20px] items-center justify-center rounded-full bg-rose-600 px-1.5 py-0.5 text-[10px] font-black text-white">
+                  {pendingCount}
+                </span>
+              ) : null}
+              {f.value === "approved" && approvedUnassignedCount > 0 ? (
+                <span className="inline-flex min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-black text-white">
+                  {approvedUnassignedCount}
+                </span>
+              ) : null}
+            </span>
           </button>
         ))}
       </div>
@@ -180,17 +208,17 @@ export default function SupervisorRequestsPage() {
       )}
 
       {hasOpenRequestModal && (
-        <div className="fixed inset-0 z-[1200] bg-slate-900/70 backdrop-blur-sm p-2 md:p-4">
-          <div className="relative mx-auto h-[94vh] md:h-[94vh] w-full max-w-6xl rounded-[2rem] bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-1200 bg-slate-900/70 backdrop-blur-sm p-2 md:p-5">
+          <div className="relative mx-auto h-[92vh] w-full max-w-5xl rounded-[2rem] bg-slate-50 shadow-2xl overflow-hidden border border-white/60">
             <button
               type="button"
               onClick={() => setRequestModal(null)}
-              className="absolute top-4 right-4 z-20 p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-900 hover:text-white transition-colors"
+              className="absolute top-4 right-4 z-20 p-2 rounded-xl bg-white/90 text-slate-600 hover:bg-slate-900 hover:text-white transition-colors shadow-sm"
               aria-label="Close request details"
             >
               <X size={18} />
             </button>
-            <div className="h-full overflow-y-auto p-4 md:p-6 pt-16">
+            <div className="h-full overflow-y-auto p-3 md:p-5 pt-16">
               <RequestDetailPage id={String(selectedRequestId)} />
             </div>
           </div>

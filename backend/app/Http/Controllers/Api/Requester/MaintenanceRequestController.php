@@ -6,10 +6,12 @@ use App\Models\MaintenanceRequest;
 use App\Models\RequestImage;
 use App\Models\RequestMessage;
 use App\Models\RequestStatusLog;
+use App\Models\User;
 use App\Models\UserNotification;
 use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 
 class MaintenanceRequestController extends RequesterController
@@ -159,9 +161,22 @@ class MaintenanceRequestController extends RequesterController
             'user_id' => $user->id,
             'type' => 'request_submitted',
             'related_id' => $ticket->id,
-            'message' => "Request #{$ticket->id} submitted successfully.",
+            'message' => "Your maintenance request #{$this->requestCode($ticket->id)} has been submitted successfully and is awaiting supervisor approval.",
             'is_read' => false,
         ]);
+
+        User::query()
+            ->whereHas('roles', fn ($q) => $q->where('name', 'supervisor'))
+            ->get(['id'])
+            ->each(fn ($supervisor) => UserNotification::create([
+                'user_id' => $supervisor->id,
+                'recipient_role' => 'supervisor',
+                'type' => 'request_submitted',
+                'module' => 'request',
+                'related_id' => $ticket->id,
+                'message' => "A new maintenance request #{$this->requestCode($ticket->id)} requires your review.",
+                'is_read' => false,
+            ]));
 
         return response()->json([
             'success' => true,
@@ -294,12 +309,6 @@ class MaintenanceRequestController extends RequesterController
         if ($message->sender_id !== $user->id) {
             return $this->forbidden();
         }
-        if ($message->created_at?->diffInMinutes(now()) > 5) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You can edit messages only within 5 minutes of sending.',
-            ], 422);
-        }
 
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
@@ -336,12 +345,6 @@ class MaintenanceRequestController extends RequesterController
         $message = RequestMessage::where('request_id', $ticket->id)->findOrFail($messageId);
         if ($message->sender_id !== $user->id) {
             return $this->forbidden();
-        }
-        if ($message->created_at?->diffInMinutes(now()) > 5) {
-            return response()->json([
-                'success' => false,
-                'message' => 'You can delete messages only within 5 minutes of sending.',
-            ], 422);
         }
 
         $message->update([
@@ -400,6 +403,123 @@ class MaintenanceRequestController extends RequesterController
         ], 201);
     }
 
+    public function verifyCompletion(Request $request, int $id): JsonResponse
+    {
+        $user = $this->requester($request);
+        $ticket = MaintenanceRequest::query()->with('workOrders')->findOrFail($id);
+
+        if ((int) $ticket->requester_id !== (int) $user->id) {
+            return $this->forbidden();
+        }
+
+        if ($ticket->status !== 'completed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only completed requests can be verified by requester.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'action' => ['required', 'in:accept,reopen'],
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $comment = trim((string) ($validated['comment'] ?? ''));
+        if ($validated['action'] === 'reopen' && $comment === '') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please provide a reason before reopening.',
+            ], 422);
+        }
+
+        $requestCode = $this->requestCode($ticket->id);
+        $latestWorkOrder = $ticket->workOrders()->latest('id')->first();
+        $oldStatus = $ticket->status;
+
+        if ($validated['action'] === 'accept') {
+            $ticket->update(['status' => 'closed']);
+
+            RequestStatusLog::create([
+                'request_id' => $ticket->id,
+                'changed_by' => $user->id,
+                'old_status' => $oldStatus,
+                'new_status' => 'closed',
+                'comment' => 'Requester verified completion and closed request.',
+            ]);
+
+            if ($latestWorkOrder?->assigned_to) {
+                $this->notifyUser(
+                    (int) $latestWorkOrder->assigned_to,
+                    'technician',
+                    'request_closed',
+                    $ticket->id,
+                    "Request #{$requestCode} has been accepted and closed by the requester."
+                );
+            }
+
+            $this->notifySupervisors(
+                'request_closed',
+                $ticket->id,
+                "Request #{$requestCode} has been successfully closed."
+            );
+
+            ActivityLogger::log($user->id, 'request_lifecycle', 'close', $ticket->id, "Requester closed Request #{$ticket->id}.", $request);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Request accepted and closed.',
+            ]);
+        }
+
+        if ($latestWorkOrder) {
+            $updates = [
+                'work_status' => 'assigned',
+                'completed_at' => null,
+            ];
+            if (Schema::hasColumn('work_orders', 'completed_by_technician_at')) {
+                $updates['completed_by_technician_at'] = null;
+            }
+            if (Schema::hasColumn('work_orders', 'status_updated_at')) {
+                $updates['status_updated_at'] = now();
+            }
+            $latestWorkOrder->update($updates);
+        }
+
+        // Internal status remains "assigned" for compatibility with existing enums/UI filters.
+        $ticket->update(['status' => 'assigned']);
+
+        RequestStatusLog::create([
+            'request_id' => $ticket->id,
+            'changed_by' => $user->id,
+            'old_status' => $oldStatus,
+            'new_status' => 'assigned',
+            'comment' => "Requester reopened request for additional work. Reason: {$comment}",
+        ]);
+
+        if ($latestWorkOrder?->assigned_to) {
+            $this->notifyUser(
+                (int) $latestWorkOrder->assigned_to,
+                'technician',
+                'request_reopened',
+                $ticket->id,
+                "Request #{$requestCode} has been reopened by the requester. Additional work is required."
+            );
+        }
+
+        $this->notifySupervisors(
+            'request_reopened',
+            $ticket->id,
+            "Request #{$requestCode} has been reopened."
+        );
+
+        ActivityLogger::log($user->id, 'request_lifecycle', 'reopen', $ticket->id, "Requester reopened Request #{$ticket->id}.", $request);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Request reopened for additional work.',
+        ]);
+    }
+
     private function profilePictureUrl(?string $path): ?string
     {
         if (!$path) {
@@ -407,5 +527,31 @@ class MaintenanceRequestController extends RequesterController
         }
         $url = Storage::disk('public')->url($path);
         return str_starts_with($url, 'http') ? $url : url($url);
+    }
+
+    private function requestCode(int $id): string
+    {
+        return sprintf('REQ-%03d', $id);
+    }
+
+    private function notifySupervisors(string $type, int $relatedId, string $message): void
+    {
+        User::query()
+            ->whereHas('roles', fn ($q) => $q->where('name', 'supervisor'))
+            ->get(['id'])
+            ->each(fn ($supervisor) => $this->notifyUser((int) $supervisor->id, 'supervisor', $type, $relatedId, $message));
+    }
+
+    private function notifyUser(int $userId, string $recipientRole, string $type, int $relatedId, string $message): void
+    {
+        UserNotification::create([
+            'user_id' => $userId,
+            'recipient_role' => $recipientRole,
+            'type' => $type,
+            'module' => 'request',
+            'related_id' => $relatedId,
+            'message' => $message,
+            'is_read' => false,
+        ]);
     }
 }

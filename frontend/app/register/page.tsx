@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { 
@@ -17,35 +18,25 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
-  ShieldCheck
 } from "lucide-react";
-import { apiRequest, writeAuthToken, writeAuthUser } from "@/lib/api";
+import { apiRequest } from "@/lib/api";
 
 type Department = { id: number; name: string; faculty: string };
-type Role = { id: number; name: string; description: string };
 type RegisterResponse = {
   success: boolean;
   message: string;
-  token: string;
-  requires_role_selection: boolean;
-  user: {
-    id: number;
-    fname: string;
-    lname: string;
-    email: string;
-    roles: Role[];
-    active_role: string | null;
-  };
+  otp?: string;
+  expires_in?: number;
 };
 
 export default function RegistrationForm() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<number[]>([]);
   
   const [showPassword, setShowPassword] = useState(false);
@@ -72,14 +63,20 @@ export default function RegistrationForm() {
   }, [localError]);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     const loadMeta = async () => {
       try {
         const [deptRes, roleRes] = await Promise.all([
           apiRequest<{ departments: Department[] }>("/api/departments", { method: "GET" }),
-          apiRequest<{ roles: Role[] }>("/api/roles", { method: "GET" }),
+          apiRequest<{ roles: { id: number; name: string; description: string }[] }>("/api/roles", { method: "GET" }),
         ]);
         setDepartments(deptRes.departments ?? []);
-        setRoles(roleRes.roles ?? []);
+        const allRoles = roleRes.roles ?? [];
+        const requesterRole = allRoles.find(r => r.name.toLowerCase() === 'requester');
+        if (requesterRole) setSelectedRoles([requesterRole.id]);
       } catch {
         setLocalError("Unable to load departments or roles. Please refresh.");
       }
@@ -95,12 +92,19 @@ export default function RegistrationForm() {
 
   const validateStep = (s: number) => {
     if (s === 1) return formData.fname && formData.lname && formData.username && formData.email;
-    if (s === 2) return formData.university_id_number && formData.dept_id && formData.phone && selectedRoles.length > 0;
+    if (s === 2) return formData.university_id_number && formData.dept_id && formData.phone;
     if (s === 3) return formData.password && formData.password_confirmation;
     return true;
   };
 
   const nextStep = () => {
+    if (step === 2) {
+      const idRegex = /^((NaScR|SoScR)\/\d{4}\/\d{2})|(SIA\/\d{4})$/;
+      if (!idRegex.test(formData.university_id_number)) {
+        setLocalError("ID format must be NaScR/0000/00, SoScR/0000/00 or SIA/0000.");
+        return;
+      }
+    }
     if (!validateStep(step)) {
       setLocalError("Please fill in all required fields for this step.");
       return;
@@ -116,6 +120,12 @@ export default function RegistrationForm() {
       setLocalError("Please confirm your security settings.");
       return;
     }
+    const idRegex = /^((NaScR|SoScR)\/\d{4}\/\d{2})|(SIA\/\d{4})$/;
+    if (!idRegex.test(formData.university_id_number)) {
+      setLocalError("Invalid University ID format.");
+      return;
+    }
+    
     if (formData.password !== formData.password_confirmation) {
       setLocalError("Passwords do not match!");
       return;
@@ -145,10 +155,12 @@ export default function RegistrationForm() {
         false
       );
 
-      writeAuthToken(data.token);
-      writeAuthUser(data.user);
-      setSuccessMessage("Account created successfully! Please sign in.");
-      setTimeout(() => router.push("/login"), 1200);
+      const otpQuery = data.otp ? `&dev_otp=${encodeURIComponent(data.otp)}` : "";
+      const successText = data.otp
+        ? `${data.message || "OTP generated (DEV MODE)"} OTP: ${data.otp}`
+        : (data.message || "OTP generated. Redirecting...");
+      setSuccessMessage(successText);
+      setTimeout(() => router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}${otpQuery}`), 1200);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Registration failed.";
       setLocalError(message);
@@ -160,16 +172,25 @@ export default function RegistrationForm() {
   const progressPercentage = (step / 3) * 100;
   const inputClass = "w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-400 text-slate-900 font-medium shadow-sm";
 
+  if (!mounted) return null;
+
   return (
     <div className="min-h-screen py-12 flex items-center justify-center p-4 bg-slate-50 text-slate-900">
       <div className="w-full max-w-lg">
         {/* Branding */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-900 rounded-2xl shadow-lg mb-4 text-white font-bold text-3xl transform hover:rotate-3 transition-transform">
-            U
-          </div>
+  <div className="flex justify-center mt-6">
+    <div className="w-20 h-20 bg-white rounded-2xl shadow-lg overflow-hidden flex items-center justify-center">
+      <Image
+        src="/hawassa-university-logo.png" 
+        alt="Hawassa University Logo" 
+        width={80}
+        height={80}
+        className="w-full h-full object-contain"
+      />
+    </div>
+  </div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Create Account</h1>
-          <p className="text-slate-500 mt-2 font-medium">Join the Facilities Management System</p>
         </div>
 
         {/* Progress Bar */}
@@ -252,37 +273,6 @@ export default function RegistrationForm() {
                       <Phone className="absolute left-3 top-3 text-slate-400" size={18} />
                       <input id="phone" type="tel" className={inputClass} placeholder="+1 (555) 000-0000" value={formData.phone} onChange={handleChange} />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-700 ml-1">Select Role(s)</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {roles.map((role) => {
-                        const selected = selectedRoles.includes(role.id);
-                        return (
-                          <button
-                            type="button"
-                            key={role.id}
-                            onClick={() => {
-                              setLocalError(null);
-                              setSelectedRoles((prev) =>
-                                prev.includes(role.id)
-                                  ? prev.filter((id) => id !== role.id)
-                                  : [...prev, role.id]
-                              );
-                            }}
-                            className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-all ${
-                              selected ? "border-blue-600 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-blue-300"
-                            }`}
-                          >
-                            <ShieldCheck size={14} />
-                            <span>{role.name}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-semibold">
-                      Choose one or more roles to enable role selection after login.
-                    </p>
                   </div>
                 </div>
               )}

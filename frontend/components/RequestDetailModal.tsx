@@ -5,7 +5,7 @@ import {
   X, MapPin, Wrench, FileText, MessageSquare, Send, 
   Clock, Phone, User, CheckCircle2, 
   UserCheck, ShieldCheck, PlayCircle, ClipboardCheck,
-  Edit2, Trash2, Check, Star
+  Edit2, Trash2, Check, Star, CheckCheck
 } from 'lucide-react';
 
 import { MaintenanceRequest, Priority, RequestMessage, TicketStatus } from '@/types';
@@ -116,8 +116,9 @@ const apiStatusToTicketStatus = (status: ApiRequestDetail['status']): TicketStat
     case 'in_progress':
       return TicketStatus.IN_PROGRESS;
     case 'completed':
-    case 'closed':
       return TicketStatus.COMPLETED;
+    case 'closed':
+      return TicketStatus.CLOSED;
     case 'rejected':
       return TicketStatus.REJECTED;
     default:
@@ -160,6 +161,7 @@ const mapApiDetailToMaintenanceRequest = (
   const latestWorkOrder = (detail.work_orders ?? [])[0];
   const approvedLog = logs.find((log) => log.new_status === 'approved');
   const assignedLog = logs.find((log) => log.new_status === 'assigned');
+  const rejectedLog = logs.find((log) => log.new_status === 'rejected');
   const completedLog = logs.find((log) => log.new_status === 'completed' || log.new_status === 'closed');
   const requesterName = fullName(detail.requester) || fallback.requesterName || 'Requester';
   const location = detail.custom_location || [detail.building?.name, detail.room?.name].filter(Boolean).join(' / ') || fallback.location || '-';
@@ -189,6 +191,7 @@ const mapApiDetailToMaintenanceRequest = (
     scheduledAt,
     completedAt: completedLog?.created_at ?? fallback.completedAt,
     completionNotes: completedLog?.comment ?? fallback.completionNotes,
+    rejectionReason: rejectedLog?.comment ?? fallback.rejectionReason,
     rating: detail.rating?.rating ?? fallback.rating,
     requesterComment: detail.rating?.comment ?? fallback.requesterComment,
     messages: (detail.messages ?? []).map((msg): RequestMessage => ({
@@ -216,6 +219,8 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
   const [participants, setParticipants] = useState<ParticipantState>({});
   const [ratingForm, setRatingForm] = useState({ rating: 5, comment: '' });
   const [ratingSaving, setRatingSaving] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
   const [editRequestState, setEditRequestState] = useState<EditRequestState | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -233,7 +238,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
   }, [initialRequest.id]);
   const canEditRequest = request.status === TicketStatus.PENDING;
   const chatLocked = rawStatus === 'closed';
-  const canSubmitFeedback = rawStatus === 'completed' && !request.rating;
+  const canSubmitFeedback = rawStatus === 'closed' && !request.rating;
 
   const mapToEditState = (detail: ApiRequestDetail): EditRequestState => {
     const categoryId = detail.category_id ?? detail.category?.id ?? null;
@@ -459,6 +464,48 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     }
   };
 
+  const handleVerifyCompletion = async (action: 'accept' | 'reopen') => {
+    if (!endpointRequestId) return;
+    if (action === 'reopen' && !reopenReason.trim()) {
+      setLoadError('Please provide a reason before reopening.');
+      return;
+    }
+
+    try {
+      setVerifyBusy(true);
+      setLoadError(null);
+      await apiRequest(
+        `/api/requester/requests/${endpointRequestId}/verify-completion`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action,
+            comment: action === 'reopen' ? reopenReason.trim() : undefined,
+          }),
+        },
+        true
+      );
+
+      const data = await apiRequest<RequestDetailResponse>(
+        `/api/requester/requests/${endpointRequestId}`,
+        { method: 'GET' },
+        true
+      );
+      setRawStatus(data.request.status);
+      setParticipants({
+        requester: data.request.requester ?? null,
+        technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
+      setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
+      setReopenReason('');
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to verify completion.');
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return null;
     const parsed = new Date(dateStr);
@@ -475,15 +522,31 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     }).format(parsed);
   };
 
-  const isEditable = (createdAt: string) => {
-    const sentTime = new Date(createdAt).getTime();
-    const now = Date.now();
-    return (now - sentTime) < 3 * 60 * 1000; 
+  const formatLifecycleTime = (dateStr?: string) => {
+    if (!dateStr) return null;
+    const parsed = new Date(dateStr);
+    if (Number.isNaN(parsed.getTime())) return dateStr;
+    return new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(parsed);
+  };
+
+  const formatChatTime = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const parsed = new Date(dateStr);
+    if (Number.isNaN(parsed.getTime())) return dateStr;
+    return new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(parsed);
   };
 
   const getStepStatus = (step: 'pending' | 'approved' | 'assigned' | 'progress' | 'completed') => {
     const status = request.status;
-    const order: Record<string, number> = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'ASSIGNED': 3, 'IN_PROGRESS': 4, 'COMPLETED': 5, 'REJECTED': -1 };
+    const order: Record<string, number> = { 'DRAFT': 0, 'PENDING': 1, 'APPROVED': 2, 'ASSIGNED': 3, 'IN_PROGRESS': 4, 'COMPLETED': 5, 'CLOSED': 6, 'REJECTED': -1 };
     const currentWeight = order[status] || 0;
     const stepWeights = { 'pending': 1, 'approved': 2, 'assigned': 3, 'progress': 4, 'completed': 5 };
     
@@ -692,7 +755,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       title="Request Lodged"
                       person={request.requesterName}
                       role="Requester"
-                      date={formatDate(request.createdAt)}
+                      date={formatLifecycleTime(request.createdAt)}
                       status={getStepStatus('pending')}
                       icon={<FileText size={14} />}
                     />
@@ -701,7 +764,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       title={request.status === 'REJECTED' ? "Request Rejected" : "Supervisor Approval"}
                       person={request.approvedBy || "Department Head"}
                       role="Supervisor"
-                      date={formatDate(request.approvedAt)}
+                      date={formatLifecycleTime(request.approvedAt)}
                       status={getStepStatus('approved')}
                       icon={<ShieldCheck size={14} />}
                       note={request.rejectionReason}
@@ -710,7 +773,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       title="Task Assigned"
                       person={request.technicianName || "Pending Team"}
                       role="Execution Unit"
-                      date={formatDate(request.assignedAt)}
+                      date={formatLifecycleTime(request.assignedAt)}
                       status={getStepStatus('assigned')}
                       icon={<UserCheck size={14} />}
                     />
@@ -718,7 +781,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       title="Maintenance In-Progress"
                       person={request.technicianName || "Assigned Tech"}
                       role="Field Work"
-                      date={formatDate(request.updatedAt)} 
+                      date={formatLifecycleTime(request.updatedAt)} 
                       status={getStepStatus('progress')}
                       icon={<PlayCircle size={14} />}
                     />
@@ -726,7 +789,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       title="Resolution Verified"
                       person={request.technicianName || "Assigned Tech"}
                       role="Final Completion"
-                      date={formatDate(request.completedAt)}
+                      date={formatLifecycleTime(request.completedAt)}
                       status={getStepStatus('completed')}
                       icon={<ClipboardCheck size={14} />}
                       note={request.completionNotes}
@@ -773,6 +836,41 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                 </section>
               )}
 
+              {rawStatus === 'completed' && (
+                <section className="rounded-[2.5rem] border border-blue-100 bg-blue-50/60 p-6 space-y-4">
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-700">
+                    Verify Completion
+                  </h3>
+                  <p className="text-sm font-medium text-slate-700">
+                    Please confirm if the maintenance work is complete and acceptable.
+                  </p>
+                  <textarea
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    placeholder="If reopening, explain what still needs to be fixed."
+                    className="w-full p-3 rounded-xl border border-blue-100 bg-white text-sm min-h-[90px]"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      disabled={verifyBusy}
+                      onClick={() => void handleVerifyCompletion('accept')}
+                      className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {verifyBusy ? 'Processing...' : 'Accept and Close'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={verifyBusy}
+                      onClick={() => void handleVerifyCompletion('reopen')}
+                      className="w-full py-3 bg-amber-500 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-600 disabled:opacity-50"
+                    >
+                      {verifyBusy ? 'Processing...' : 'Reject and Reopen'}
+                    </button>
+                  </div>
+                </section>
+              )}
+
               {request.rating && (
                 <section className="rounded-[2.5rem] border border-emerald-100 bg-emerald-50/60 p-6">
                   <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700 mb-3 flex items-center gap-2">
@@ -794,10 +892,11 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                 </div>
               ) : (
                 <div className="flex-1 space-y-6 pb-20">
-                  {request.messages.map((msg) => {
+                  {request.messages.map((msg, index) => {
                     const isMe = msg.senderId === currentUser?.id;
-                    const canAct = !chatLocked && isMe && isEditable(msg.createdAt);
+                    const canAct = !chatLocked && isMe;
                     const isEditing = editingMessageId === msg.id;
+                    const seenByOtherUser = isMe && request.messages!.slice(index + 1).some((m) => m.senderId !== currentUser?.id);
 
                     return (
                       <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group`}>
@@ -841,9 +940,14 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                         </div>
                         <div className="flex items-center space-x-2 mt-1.5 px-1">
                           <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
-                            {msg.senderName} • {formatDate(msg.createdAt)}
+                            {msg.senderName} • {formatChatTime(msg.createdAt)}
                             {msg.updatedAt && <span className="ml-1 normal-case text-blue-400 font-medium italic">(edited)</span>}
                           </span>
+                          {isMe && (
+                            <span className={`text-[10px] ${seenByOtherUser ? 'text-blue-500' : 'text-slate-400'}`}>
+                              {seenByOtherUser ? <CheckCheck size={12} /> : <Check size={12} />}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
@@ -859,7 +963,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         {view === 'chat' && (
           <div className="p-4 bg-white border-t border-slate-100 sticky bottom-0 z-30 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
             <p className="text-[9px] font-bold text-slate-400 mb-2 uppercase tracking-widest">
-              Chat for this request only. Messages can be edited or deleted within 5 minutes.
+              Chat for this request only. You can edit or delete your messages.
             </p>
             <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
               <input 
@@ -905,9 +1009,8 @@ function TimelineStep({ title, person, role, date, status, icon, note }: {
         <div className="flex justify-between items-start">
            <div>
               <h4 className={`text-[11px] font-black uppercase tracking-wider mb-0.5 ${status === 'rejected' ? 'text-red-600' : 'text-slate-900'}`}>{title}</h4>
-              <div className="flex items-center space-x-2 text-xs">
-                <span className="font-bold text-slate-700">{person}</span>
-                <span className="text-[10px] text-slate-400 font-medium px-1.5 py-0.5 bg-slate-50 rounded-md border border-slate-100">{role}</span>
+              <div className="flex items-center text-xs">
+                <span className="font-bold text-slate-700">{`${role}: ${person}`}</span>
               </div>
               {note && (
                 <p className={`mt-2 p-2 rounded-xl text-[11px] font-medium leading-relaxed border ${status === 'rejected' ? 'bg-red-50 text-red-700 border-red-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>

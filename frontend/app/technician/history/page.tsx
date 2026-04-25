@@ -1,4 +1,3 @@
 "use client";
-import TechnicianDashboardPage from "../../../pages/Technician/DashboardPage";
-export default function RoutePage() { return <TechnicianDashboardPage />; }
-
+import CompletedPage from "../../../pages/Technician/CompletedPage";
+export default function RoutePage() { return <CompletedPage />; }

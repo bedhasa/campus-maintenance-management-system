@@ -29,7 +29,10 @@ class MeNotificationController extends ModuleController
             ->where(function ($q) use ($user, $role) {
                 $q->where('user_id', $user->id);
                 if ($role) {
-                    $q->orWhere('recipient_role', $role);
+                    $q->orWhere(function ($inner) use ($role) {
+                        $inner->whereNull('user_id')
+                            ->where('recipient_role', $role);
+                    });
                 }
             })
             ->latest()
@@ -60,4 +63,3 @@ class MeNotificationController extends ModuleController
         return response()->json(['success' => true]);
     }
 }
-

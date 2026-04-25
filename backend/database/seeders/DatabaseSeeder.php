@@ -19,6 +19,7 @@ class DatabaseSeeder extends Seeder
             AssetSeeder::class,
             UserSeeder::class,
             EnterpriseModuleSeeder::class,
+            AnalyticsDemoSeeder::class,
         ]);
     }
 }

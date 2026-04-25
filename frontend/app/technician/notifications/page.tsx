@@ -1,4 +1,3 @@
 "use client";
-import NotificationsPage from "../../../pages/Common/NotificationsPage";
-export default function RoutePage() { return <NotificationsPage />; }
-
+import TechnicianNotificationsPage from "../../../pages/Technician/NotificationsPage";
+export default function RoutePage() { return <TechnicianNotificationsPage />; }

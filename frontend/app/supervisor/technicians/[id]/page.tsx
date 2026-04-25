@@ -1,8 +1,6 @@
-"use client";
-
 import TechnicianProfilePage from "../../../../pages/Supervisor/TechnicianProfilePage";
 
-export default function RoutePage({ params }: { params: { id: string } }) {
-  return <TechnicianProfilePage id={params.id} />;
+export default async function RoutePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  return <TechnicianProfilePage id={id} />;
 }
-
