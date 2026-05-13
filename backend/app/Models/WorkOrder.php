@@ -69,4 +69,14 @@ class WorkOrder extends Model
     {
         return $this->hasMany(WorkOrderStatusLog::class, 'work_order_id');
     }
+
+    public function technicianProgressNotes()
+    {
+        return $this->hasMany(TechnicianProgressNote::class, 'work_order_id');
+    }
+
+    public function technicianCompletionReport()
+    {
+        return $this->hasOne(TechnicianCompletionReport::class, 'work_order_id');
+    }
 }

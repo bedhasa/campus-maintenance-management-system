@@ -59,6 +59,7 @@ interface AssetRecord {
   room_id?: string;
   room?: Room | null;
   serial_number?: string | null;
+  image_path?: string | null;
   status: "active" | "inactive";
 }
 
@@ -75,6 +76,7 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<number | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const [search, setSearch] = useState("");
   const [buildingFilter, setBuildingFilter] = useState<string>("all");
@@ -92,6 +94,7 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
   const resetForm = useCallback(() => {
     setForm(emptyForm);
     setEditingId(null);
+    setImageFile(null);
     setError(null);
     setSuccess(null);
   }, []);
@@ -203,6 +206,7 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
       serial_number: asset.serial_number ?? "",
       status: asset.status,
     });
+    setImageFile(null);
     setError(null);
     setSuccess(null);
   };
@@ -218,27 +222,27 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
     setSuccess(null);
 
     try {
-      const payload = {
-        name: form.name.trim(),
-        category_id: Number(form.category_id),
-        building_id: Number(form.building_id),
-        room_id: Number(form.room_id),
-        serial_number: form.serial_number.trim() || null,
-        status: form.status,
-      };
+      const formData = new FormData();
+      formData.append("name", form.name.trim());
+      formData.append("category_id", form.category_id);
+      formData.append("building_id", form.building_id);
+      formData.append("room_id", form.room_id);
+      if (form.serial_number.trim()) formData.append("serial_number", form.serial_number.trim());
+      formData.append("status", form.status);
+      if (imageFile) formData.append("image", imageFile);
 
       if (editingId) {
+        // use POST with _method=PUT for FormData
+        formData.append("_method", "PUT");
         await apiRequest(`/api/supervisor/assets/${editingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          method: "POST",
+          body: formData,
         }, true);
         setSuccess("Asset updated successfully.");
       } else {
         await apiRequest("/api/supervisor/assets", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: formData,
         }, true);
         setSuccess("Asset added successfully.");
       }
@@ -397,14 +401,25 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
                 </div>
               </div>
 
-              <div>
-                <label className={labelStyle}>Serial Number</label>
-                <input
-                  className={inputStyle}
-                  value={form.serial_number}
-                  onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
-                  placeholder="Optional serial number"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelStyle}>Serial Number</label>
+                  <input
+                    className={inputStyle}
+                    value={form.serial_number}
+                    onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
+                    placeholder="Optional serial number"
+                  />
+                </div>
+                <div>
+                  <label className={labelStyle}>Asset Image</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className={`${inputStyle} p-1.5`}
+                    onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                  />
+                </div>
               </div>
 
               <button
@@ -507,9 +522,16 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
               <div className="sticky top-0 h-fit rounded-3xl border border-slate-200 bg-slate-50/50 p-6">
                 {selectedAsset ? (
                   <div className="space-y-6">
-                    <div>
-                      <h3 className="text-xl font-black text-slate-900">{selectedAsset.name}</h3>
-                      <p className="mt-1 text-xs font-bold uppercase tracking-widest text-sky-600">Asset Profile</p>
+                    <div className="flex gap-6">
+                      {selectedAsset.image_path && (
+                        <div className="w-32 h-32 shrink-0">
+                          <img src={`http://127.0.0.1:8000/storage/${selectedAsset.image_path}`} alt={selectedAsset.name} className="w-full h-full object-cover rounded-2xl border border-slate-200 shadow-sm" />
+                        </div>
+                      )}
+                      <div>
+                        <h3 className="text-xl font-black text-slate-900">{selectedAsset.name}</h3>
+                        <p className="mt-1 text-xs font-bold uppercase tracking-widest text-sky-600">Asset Profile</p>
+                      </div>
                     </div>
 
                     <div className="grid gap-4">

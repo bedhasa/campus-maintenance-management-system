@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
-import { AlertTriangle, Edit2, Plus, RefreshCw, Save, Search, X, Package } from "lucide-react";
-import { InventoryPart, InventoryPartFormValues, isLowStock, stockTone } from "./inventory-utils";
+import Image from "next/image";
+import { AlertTriangle, Edit2, ImagePlus, Plus, RefreshCw, Save, Search, X, Package } from "lucide-react";
+import { InventoryPart, InventoryPartFormValues, getInventoryImageUrl, isLowStock, stockTone } from "./inventory-utils";
 
 type PartsResponse = {
   success: boolean;
@@ -24,6 +25,7 @@ const EMPTY_FORM: InventoryPartFormValues = {
   unit_price: "",
   quantity_available: "0",
   minimum_stock: "5",
+  image: null,
 };
 
 export default function SparePartsManagementPage() {
@@ -35,6 +37,7 @@ export default function SparePartsManagementPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingPartId, setEditingPartId] = useState<number | null>(null);
   const [form, setForm] = useState<InventoryPartFormValues>(EMPTY_FORM);
+  const [imagePreview, setImagePreview] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,6 +77,7 @@ export default function SparePartsManagementPage() {
   const openCreate = () => {
     setEditingPartId(null);
     setForm(EMPTY_FORM);
+    setImagePreview("");
     setEditorOpen(true);
   };
 
@@ -85,7 +89,9 @@ export default function SparePartsManagementPage() {
       unit_price: part.unit_price != null ? String(part.unit_price) : "",
       quantity_available: String(part.quantity_available ?? 0),
       minimum_stock: String(part.minimum_stock ?? 5),
+      image: null,
     });
+    setImagePreview(getInventoryImageUrl(part));
     setEditorOpen(true);
   };
 
@@ -93,32 +99,35 @@ export default function SparePartsManagementPage() {
     if (saving) return;
     setEditorOpen(false);
     setEditingPartId(null);
+    setImagePreview("");
   };
 
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
     try {
-      const payload = {
-        name: form.name.trim(),
-        part_code: form.part_code.trim(),
-        unit_price: Number(form.unit_price),
-        quantity_available: Number(form.quantity_available),
-        minimum_stock: Number(form.minimum_stock || 0),
-      };
+      const payload = new FormData();
+      payload.append("name", form.name.trim());
+      payload.append("part_code", form.part_code.trim());
+      payload.append("unit_price", String(Number(form.unit_price || 0)));
+      payload.append("quantity_available", String(Number(form.quantity_available)));
+      payload.append("minimum_stock", String(Number(form.minimum_stock || 0)));
+      if (form.image) {
+        payload.append("image", form.image);
+      }
 
       const response = await apiRequest<SavePartResponse>(
         editingPartId ? `/api/inventory/spare-parts/${editingPartId}` : "/api/inventory/spare-parts",
         {
           method: editingPartId ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: payload,
         },
         true
       );
 
       setToast(response.message ?? "Inventory record saved.");
       setEditorOpen(false);
+      setImagePreview("");
       await load();
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Unable to save.");
@@ -190,7 +199,7 @@ export default function SparePartsManagementPage() {
               <tr className="bg-slate-50/50 border-b border-slate-100">
                 <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">Part Details</th>
                 <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">Stock Status</th>
-                <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">Price (UGX)</th>
+                <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">Cost (UGX)</th>
                 <th className="px-6 py-5 text-[10px] font-black uppercase tracking-widest text-slate-400">Threshold</th>
                 <th className="px-6 py-5 text-right text-[10px] font-black uppercase tracking-widest text-slate-400">Action</th>
               </tr>
@@ -206,8 +215,26 @@ export default function SparePartsManagementPage() {
                 filtered.map((part) => (
                   <tr key={part.id} className="group hover:bg-slate-50/30 transition-colors">
                     <td className="px-6 py-5">
-                      <p className="font-black text-slate-900">{part.name}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{part.part_code}</p>
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-100 bg-slate-50">
+                          {getInventoryImageUrl(part) ? (
+                            <Image
+                              src={getInventoryImageUrl(part)}
+                              alt={part.name}
+                              width={56}
+                              height={56}
+                              unoptimized
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <Package size={18} className="text-slate-300" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-black text-slate-900">{part.name}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{part.part_code}</p>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex items-center gap-2">
@@ -251,7 +278,7 @@ export default function SparePartsManagementPage() {
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/60 p-4 backdrop-blur-sm sm:items-center">
           <form
             onSubmit={submitForm}
-            className="w-full max-w-xl animate-in fade-in slide-in-from-bottom-4 rounded-[2.5rem] bg-white p-6 shadow-2xl md:p-8"
+            className="flex max-h-[90vh] w-full max-w-2xl flex-col animate-in fade-in slide-in-from-bottom-4 rounded-[2.5rem] bg-white p-6 shadow-2xl md:p-7"
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -267,59 +294,100 @@ export default function SparePartsManagementPage() {
               </button>
             </div>
 
-            <div className="mt-8 space-y-4">
-              <FormField label="Part Name">
-                <input
-                  required
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  placeholder="e.g. Hydraulic Filter"
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
-                />
-              </FormField>
+            <div className="mt-6 flex-1 overflow-y-auto pr-1">
+              <div className="grid gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label="Part Name">
+                    <input
+                      required
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      placeholder="e.g. Hydraulic Filter"
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
+                    />
+                  </FormField>
 
-              <FormField label="Part Code">
-                <input
-                  required
-                  value={form.part_code}
-                  onChange={(e) => setForm({ ...form, part_code: e.target.value })}
-                  placeholder="e.g. PRT-990-X"
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
-                />
-              </FormField>
+                  <FormField label="Part Code">
+                    <input
+                      required
+                      value={form.part_code}
+                      onChange={(e) => setForm({ ...form, part_code: e.target.value })}
+                      placeholder="e.g. PRT-990-X"
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
+                    />
+                  </FormField>
+                </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <FormField label="Unit Price (UGX)">
-                  <input
-                    required
-                    type="number"
-                    value={form.unit_price}
-                    onChange={(e) => setForm({ ...form, unit_price: e.target.value })}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
-                  />
-                </FormField>
-                <FormField label="Current Qty">
-                  <input
-                    required
-                    type="number"
-                    value={form.quantity_available}
-                    onChange={(e) => setForm({ ...form, quantity_available: e.target.value })}
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
-                  />
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <FormField label="Cost (UGX)">
+                    <input
+                      required
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={form.unit_price}
+                      onChange={(e) => setForm({ ...form, unit_price: e.target.value })}
+                      placeholder="e.g. 100.95"
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
+                    />
+                  </FormField>
+                  <FormField label="Quantity">
+                    <input
+                      required
+                      type="number"
+                      value={form.quantity_available}
+                      onChange={(e) => setForm({ ...form, quantity_available: e.target.value })}
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
+                    />
+                  </FormField>
+                  <FormField label="Minimum Stock">
+                    <input
+                      type="number"
+                      value={form.minimum_stock}
+                      onChange={(e) => setForm({ ...form, minimum_stock: e.target.value })}
+                      className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
+                    />
+                  </FormField>
+                </div>
+
+                <FormField label="Part Image">
+                  <label className="flex cursor-pointer flex-col gap-4 rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-4 text-sm font-bold text-slate-600">
+                    <div className="flex items-center gap-3">
+                      <div className="rounded-2xl bg-slate-100 p-3">
+                        <ImagePlus size={18} className="text-slate-400" />
+                      </div>
+                      <p className="text-sm font-black text-slate-900">{form.image ? form.image.name : "Upload part photo"}</p>
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0] ?? null;
+                        setForm({ ...form, image: file });
+                        setImagePreview(file ? URL.createObjectURL(file) : imagePreview);
+                      }}
+                    />
+                    <div className="flex items-center justify-center overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white">
+                      {imagePreview ? (
+                        <Image
+                          src={imagePreview}
+                          alt="Part preview"
+                          width={640}
+                          height={220}
+                          unoptimized
+                          className="h-48 w-full object-cover"
+                        />
+                      ) : (
+                        <p className="px-6 py-10 text-sm font-medium text-slate-400">No image selected</p>
+                      )}
+                    </div>
+                  </label>
                 </FormField>
               </div>
-
-              <FormField label="Low Stock Threshold (Alert me when below)">
-                <input
-                  type="number"
-                  value={form.minimum_stock}
-                  onChange={(e) => setForm({ ...form, minimum_stock: e.target.value })}
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-4 text-sm font-bold text-slate-900 outline-none focus:border-[#003366]"
-                />
-              </FormField>
             </div>
 
-            <div className="mt-10 flex gap-3">
+            <div className="mt-6 flex gap-3">
               <button
                 type="submit"
                 disabled={saving}

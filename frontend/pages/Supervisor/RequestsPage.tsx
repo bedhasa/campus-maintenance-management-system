@@ -27,6 +27,7 @@ export default function SupervisorRequestsPage() {
   const [loading, setLoading] = useState(true);
 
   const activeStatus = params?.get("status") || "all";
+  const initialTab = params?.get("tab") === "chat" ? "chat" : "details";
   const selectedRequestRaw = params?.get("request");
   const selectedRequestId = selectedRequestRaw ? Number(selectedRequestRaw) : NaN;
   const hasOpenRequestModal = Number.isFinite(selectedRequestId) && selectedRequestId > 0;
@@ -64,7 +65,13 @@ export default function SupervisorRequestsPage() {
         true
       ),
     ]);
-    setItems(data.requests.data ?? []);
+
+    // Filter out requests that are already assigned or in progress to keep the requests list for triage only
+    const activeRequests = (data.requests.data ?? []).filter(r => 
+      !['assigned', 'in_progress', 'completed', 'closed'].includes(r.status)
+    );
+
+    setItems(activeRequests);
     setPendingCount(Number(dashboard.summary?.new_requests ?? 0));
     setApprovedUnassignedCount((approvedData.requests.data ?? []).length);
     setLoading(false);
@@ -219,7 +226,7 @@ export default function SupervisorRequestsPage() {
               <X size={18} />
             </button>
             <div className="h-full overflow-y-auto p-3 md:p-5 pt-16">
-              <RequestDetailPage id={String(selectedRequestId)} />
+              <RequestDetailPage id={String(selectedRequestId)} initialTab={initialTab} />
             </div>
           </div>
         </div>

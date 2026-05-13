@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
-import { ChevronDown, ChevronUp, History, Hash, User, Calendar, Package } from "lucide-react";
+import { ChevronDown, ChevronUp, History, Calendar, Package, Search, Wrench } from "lucide-react";
 import { PartIssueRecord, buildPersonName, formatDateTime } from "./inventory-utils";
 
 type IssuesResponse = {
@@ -15,6 +15,7 @@ export default function IssueHistoryPage() {
   const [items, setItems] = useState<PartIssueRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,6 +30,20 @@ export default function IssueHistoryPage() {
   useEffect(() => { void load(); }, [load]);
 
   const toggleRow = (id: number) => setExpandedId(expandedId === id ? null : id);
+  const filteredItems = items.filter((issue) => {
+    const term = query.trim().toLowerCase();
+    if (!term) return true;
+    const hay = [
+      issue.part?.name ?? "",
+      issue.part?.part_code ?? "",
+      String(issue.work_order_id ?? ""),
+      buildPersonName(issue.technician),
+      issue.issue_code ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    return hay.includes(term);
+  });
 
   if (loading) return <PageSkeleton cards={1} rows={8} />;
 
@@ -41,6 +56,15 @@ export default function IssueHistoryPage() {
         </div>
         <h1 className="text-3xl font-black text-slate-900 tracking-tight">Issue History</h1>
       </header>
+      <div className="relative">
+        <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search by part, code, work order, technician..."
+          className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm font-semibold text-slate-900"
+        />
+      </div>
 
       <div className="overflow-hidden rounded-[2rem] border border-slate-100 bg-white shadow-sm">
         {/* Table Header */}
@@ -52,12 +76,12 @@ export default function IssueHistoryPage() {
         </div>
 
         <div className="divide-y divide-slate-50">
-          {items.length === 0 ? (
+          {filteredItems.length === 0 ? (
             <div className="p-12 text-center text-slate-400 font-bold uppercase tracking-widest text-[10px]">
               No transaction history available
             </div>
           ) : (
-            items.map((issue) => {
+            filteredItems.map((issue) => {
               const isExpanded = expandedId === issue.id;
               return (
                 <div key={issue.id} className={`transition-colors ${isExpanded ? 'bg-slate-50/30' : 'hover:bg-slate-50/20'}`}>
@@ -88,24 +112,19 @@ export default function IssueHistoryPage() {
                     <div className="px-6 pb-6 animate-in slide-in-from-top-2 duration-200">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <DetailCard 
-                          icon={<User size={14}/>} 
-                          label="Recipient Technician" 
+                          icon={<Wrench size={14}/>} 
+                          label="Technician" 
                           value={buildPersonName(issue.technician)} 
                         />
                         <DetailCard 
-                          icon={<Hash size={14}/>} 
-                          label="Issued By (Admin)" 
-                          value={issue.inventory_officer_name_snapshot || buildPersonName(issue.issuedBy)} 
-                        />
-                        <DetailCard 
                           icon={<Calendar size={14}/>} 
-                          label="Transaction Date" 
+                          label="Date" 
                           value={formatDateTime(issue.issue_date)} 
                         />
                         <DetailCard
-                          icon={<User size={14}/>}
-                          label="Supervisor"
-                          value={issue.supervisor_name_snapshot || buildPersonName(issue.supervisor)}
+                          icon={<Package size={14}/>}
+                          label="Work Order"
+                          value={toWorkOrderCode(issue.work_order_id, issue.workOrder?.created_at)}
                         />
                         <DetailCard
                           icon={<Package size={14}/>}
@@ -117,14 +136,6 @@ export default function IssueHistoryPage() {
                           label="Total Cost"
                           value={toCurrency(issue.total_cost)}
                         />
-                      </div>
-                      
-                      <div className="mt-4 flex items-center justify-between p-3 rounded-xl border border-dashed border-slate-200 bg-white/50">
-                        <div className="flex items-center gap-2">
-                            <Package size={12} className="text-slate-400" />
-                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">System Log ID</span>
-                        </div>
-                        <span className="text-[10px] font-mono font-bold text-slate-500">{issue.issue_code || `TXN-INV-${issue.id.toString().padStart(5, '0')}`}</span>
                       </div>
                     </div>
                   )}

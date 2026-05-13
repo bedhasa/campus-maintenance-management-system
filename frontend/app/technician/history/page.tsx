@@ -1,3 +1,3 @@
 "use client";
-import CompletedPage from "../../../pages/Technician/CompletedPage";
-export default function RoutePage() { return <CompletedPage />; }
+import HistoryPage from "../../../pages/Technician/HistoryPage";
+export default function RoutePage() { return <HistoryPage />; }

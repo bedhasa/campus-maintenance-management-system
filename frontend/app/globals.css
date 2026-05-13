@@ -56,3 +56,24 @@ html[data-font-size="large"] body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+@media print {
+  /* Hide scrollbars during printing */
+  ::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  /* Ensure the body expands fully and drops scrolling */
+  html,
+  body {
+    overflow: visible !important;
+    height: max-content !important;
+    background-color: white !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Force page breaks before major sections if they don't fit */
+  .print-page-break {
+    page-break-before: always;
+  }
+}

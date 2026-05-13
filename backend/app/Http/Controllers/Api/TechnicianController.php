@@ -3,50 +3,76 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\MaintenanceRequest;
+use App\Models\PartIssue;
 use App\Models\RequestImage;
-use App\Models\RequestMessage;
 use App\Models\RequestStatusLog;
 use App\Models\SparePart;
+use App\Models\TechnicianCompletionReport;
+use App\Models\TechnicianCompletionReportSparePart;
+use App\Models\TechnicianProgressNote;
 use App\Models\UserNotification;
 use App\Models\User;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderSparePart;
 use App\Models\WorkOrderStatusLog;
 use App\Services\ActivityLogger;
+use App\Services\EmailNotifier;
+use App\Support\SimilarCompletionCases;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Database\QueryException;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class TechnicianController extends ModuleController
 {
+    /** @return list<string> */
+    private function probableCauseOptions(): array
+    {
+        return [
+            'Electrical Failure',
+            'Wear and Tear',
+            'Overheating',
+            'Loose Connection',
+            'User Error',
+            'Environmental Damage',
+            'Poor Maintenance',
+            'Component Aging',
+            'Unknown',
+        ];
+    }
+
     private array $workOrderColumnCache = [];
 
     public function index(Request $request): JsonResponse
     {
         $user = $this->authorizeRoles($request, ['technician', 'admin']);
         $validated = $request->validate([
-            'status' => ['nullable', 'in:assigned,in_progress,paused,completed,active'],
+            'status' => ['nullable', 'in:assigned,in_progress,paused,completed,active,open'],
             'filter' => ['nullable', 'in:delayed'],
+            'priority' => ['nullable', 'in:low,medium,high,urgent'],
         ]);
 
         $query = WorkOrder::query()
             ->where('assigned_to', $user->id)
             ->with([
-                'request:id,title,description,priority,status,due_date,created_at,category_id,building_id,room_id',
+                'request:id,title,description,priority,status,due_date,created_at,category_id,building_id,room_id,custom_location',
                 'request.category:id,name',
                 'request.building:id,name',
                 'request.room:id,name',
             ])
-            ->orderByRaw("CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END")
+            // Default list is first-come (oldest assigned first).
             ->orderBy('created_at')
             ->orderBy('id');
 
         if (!empty($validated['status'])) {
             if ($validated['status'] === 'active') {
                 $query->whereIn('work_status', ['in_progress', 'paused']);
+            } elseif ($validated['status'] === 'open') {
+                $query->whereIn('work_status', ['assigned', 'in_progress', 'paused']);
             } else {
                 $query->where('work_status', $validated['status']);
             }
@@ -61,6 +87,10 @@ class TechnicianController extends ModuleController
                         ->where('due_date', '<', now())
                         ->whereNotIn('status', ['completed', 'closed', 'rejected']));
             });
+        }
+
+        if (!empty($validated['priority'])) {
+            $query->whereHas('request', fn ($rq) => $rq->where('priority', $validated['priority']));
         }
 
         return response()->json([
@@ -92,7 +122,12 @@ class TechnicianController extends ModuleController
                     ->whereIn('work_status', ['assigned', 'in_progress', 'paused'])
                     ->count(),
             ],
-            'assigned_jobs' => (clone $base)->with(['request:id,title,priority,status,due_date', 'spareParts'])->latest()->paginate(15),
+            'assigned_jobs' => (clone $base)->with([
+                'request:id,title,priority,status,due_date,building_id,room_id,custom_location',
+                'request.building:id,name',
+                'request.room:id,name',
+                'spareParts',
+            ])->orderBy('created_at')->orderBy('id')->paginate(15),
         ]);
     }
 
@@ -117,9 +152,12 @@ class TechnicianController extends ModuleController
             return $this->forbidden();
         }
 
+        $detail = $this->freshWorkOrderDetail($workOrder);
+        $detail->setAttribute('similar_completion_cases', SimilarCompletionCases::forWorkOrder($detail));
+
         return response()->json([
             'success' => true,
-            'work_order' => $this->freshWorkOrderDetail($workOrder),
+            'work_order' => $detail,
         ]);
     }
 
@@ -300,37 +338,22 @@ class TechnicianController extends ModuleController
             return $this->forbidden();
         }
 
-        if (!$workOrder->request) {
-            return response()->json([
-                'success' => false,
-                'message' => 'This work order is not linked to a request.',
-            ], 422);
-        }
-
         $validated = $request->validate([
             'message' => ['required', 'string', 'max:2000'],
         ]);
 
-        $message = RequestMessage::create([
-            'request_id' => $workOrder->request->id,
-            'sender_id' => $user->id,
-            'message' => $validated['message'],
+        $note = TechnicianProgressNote::create([
+            'work_order_id' => $workOrder->id,
+            'technician_id' => $user->id,
+            'note' => $validated['message'],
         ]);
 
-        $this->notifyRole(
-            'supervisor',
-            'technician_progress_update',
-            'work_order',
-            $workOrder->request->id,
-            "Progress update on Request #{$workOrder->request->id}: {$validated['message']}"
-        );
-
-        ActivityLogger::log($user->id, 'work_order', 'progress_update', $workOrder->id, "Progress note added to work order #{$workOrder->id}.", $request);
+        ActivityLogger::log($user->id, 'work_order', 'progress_update', $workOrder->id, "Private reminder added to work order #{$workOrder->id}.", $request);
 
         return response()->json([
             'success' => true,
-            'message' => 'Progress note saved.',
-            'data' => $message->load('sender:id,fname,lname,phone'),
+            'message' => 'Reminder saved.',
+            'data' => $note->fresh(),
         ], 201);
     }
 
@@ -344,10 +367,13 @@ class TechnicianController extends ModuleController
         }
 
         if ($workOrder->work_status === 'completed') {
+            $detail = $this->freshWorkOrderDetail($workOrder);
+            $detail->setAttribute('similar_completion_cases', SimilarCompletionCases::forWorkOrder($detail));
+
             return response()->json([
                 'success' => true,
                 'message' => 'Work order is already completed.',
-                'work_order' => $this->freshWorkOrderDetail($workOrder),
+                'work_order' => $detail,
             ]);
         }
 
@@ -358,48 +384,154 @@ class TechnicianController extends ModuleController
             ], 422);
         }
 
+        $rawSteps = $request->input('diagnostic_steps');
+        if (is_string($rawSteps)) {
+            $decoded = json_decode($rawSteps, true);
+            $rawSteps = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($rawSteps)) {
+            $rawSteps = [];
+        }
+        $request->merge(['diagnostic_steps' => $rawSteps]);
+
         $validated = $request->validate([
+            'resolution_summary' => ['nullable', 'string', 'max:2000'],
             'completion_note' => ['nullable', 'string', 'max:5000'],
-            'problem_found' => ['nullable', 'string', 'max:5000'],
-            'action_taken' => ['nullable', 'string', 'max:5000'],
+            'problem_found' => ['required', 'string', 'max:5000'],
+            'probable_cause' => ['required', Rule::in($this->probableCauseOptions())],
+            'probable_cause_custom' => ['nullable', 'string', 'max:500'],
+            'diagnostic_steps' => ['required', 'array', 'min:1'],
+            'diagnostic_steps.*' => ['required', 'string', 'max:2000'],
+            'action_taken' => ['required', 'string', 'max:5000'],
+            'downtime_hours' => ['nullable', 'numeric', 'min:0', 'max:100000'],
             'delay_reason' => ['nullable', 'string', 'max:1000'],
             'spare_parts' => ['sometimes', 'array'],
             'spare_parts.*.spare_part_id' => ['required', 'integer', 'exists:spare_parts,id'],
             'spare_parts.*.quantity_used' => ['required', 'integer', 'min:1'],
+            'spare_parts.*.unit_cost' => ['nullable', 'numeric', 'min:0'],
             'image' => ['nullable', 'image', 'max:4096'],
+            'images' => ['sometimes', 'array', 'max:10'],
+            'images.*' => ['image', 'max:4096'],
         ]);
 
+        $resolutionSummary = trim((string) ($validated['resolution_summary'] ?? ''));
+        if ($resolutionSummary === '') {
+            $resolutionSummary = trim((string) ($validated['completion_note'] ?? ''));
+        }
+        if ($resolutionSummary === '') {
+            throw ValidationException::withMessages([
+                'resolution_summary' => ['Please provide a resolution summary (short summary of the repair).'],
+            ]);
+        }
+
+        $completionNoteColumn = $resolutionSummary;
+
+        $resolvedDelayReason = trim((string) ($validated['delay_reason'] ?? $workOrder->delay_reason ?? ''));
+
         $isOverdue = $workOrder->request?->due_date && now()->greaterThan($workOrder->request->due_date);
-        if ($isOverdue && empty($validated['delay_reason'])) {
+        if ($isOverdue && $resolvedDelayReason === '') {
             return response()->json([
                 'success' => false,
-                'message' => 'Delay reason is required when completing overdue work.',
+                'message' => 'Please save a delay reason before completing overdue work.',
             ], 422);
         }
 
         $oldStatus = $workOrder->work_status;
         $now = now();
 
-        DB::transaction(function () use ($validated, $request, $user, $workOrder, $oldStatus, $now) {
+        $requestAnchor = $workOrder->request?->created_at ?? $workOrder->created_at;
+        $computedDowntime = round(Carbon::parse($requestAnchor)->diffInMinutes($now) / 60, 2);
+        $downtimeHours = isset($validated['downtime_hours']) && $validated['downtime_hours'] !== null
+            ? (float) $validated['downtime_hours']
+            : $computedDowntime;
+
+        $issueReportedSnapshot = null;
+        if ($workOrder->request) {
+            $t = trim((string) $workOrder->request->title);
+            $d = trim((string) $workOrder->request->description);
+            $issueReportedSnapshot = trim($t.(($t !== '' && $d !== '') ? "\n\n" : '').$d);
+        }
+
+        DB::transaction(function () use ($validated, $request, $user, $workOrder, $oldStatus, $now, $resolvedDelayReason, $resolutionSummary, $completionNoteColumn, $issueReportedSnapshot, $downtimeHours) {
+            $report = TechnicianCompletionReport::updateOrCreate(
+                ['work_order_id' => $workOrder->id],
+                [
+                    'technician_id' => $user->id,
+                    'issue_reported' => $issueReportedSnapshot,
+                    'completion_note' => $completionNoteColumn,
+                    'resolution_summary' => $resolutionSummary,
+                    'problem_found' => $validated['problem_found'] ?? null,
+                    'probable_cause' => $validated['probable_cause'],
+                    'probable_cause_custom' => isset($validated['probable_cause_custom'])
+                        ? trim((string) $validated['probable_cause_custom']) ?: null
+                        : null,
+                    'diagnostic_steps' => $validated['diagnostic_steps'],
+                    'action_taken' => $validated['action_taken'] ?? null,
+                    'downtime_hours' => $downtimeHours,
+                    'delay_reason' => $resolvedDelayReason !== '' ? $resolvedDelayReason : null,
+                    'submitted_at' => $now,
+                ]
+            );
+
+            $attachmentPaths = is_array($report->attachment_paths) ? $report->attachment_paths : [];
+
+            if ($request->hasFile('images')) {
+                foreach ($request->file('images') as $file) {
+                    if ($file && $file->isValid()) {
+                        $attachmentPaths[] = $file->store('request-images', 'public');
+                    }
+                }
+            }
+
+            if ($request->hasFile('image')) {
+                $attachmentPaths[] = $request->file('image')->store('request-images', 'public');
+            }
+
+            $attachmentPaths = array_values(array_unique($attachmentPaths));
+            $primaryImage = $attachmentPaths[0] ?? null;
+
+            $report->update([
+                'attachment_paths' => $attachmentPaths !== [] ? $attachmentPaths : null,
+                'image_path' => $primaryImage ?? $report->image_path,
+            ]);
+
+            TechnicianCompletionReportSparePart::query()
+                ->where('completion_report_id', $report->id)
+                ->delete();
+
             $seenSpareParts = [];
+
             foreach ($validated['spare_parts'] ?? [] as $usage) {
                 $partId = (int) $usage['spare_part_id'];
                 if (isset($seenSpareParts[$partId])) {
                     throw ValidationException::withMessages([
-                    'spare_parts' => ['Duplicate spare part entries are not allowed.'],
-                ]);
+                        'spare_parts' => ['Duplicate spare part entries are not allowed.'],
+                    ]);
                 }
                 $seenSpareParts[$partId] = true;
 
-                $part = SparePart::query()->where('id', $partId)->firstOrFail();
+                $part = SparePart::query()->findOrFail($partId);
                 $qty = (int) $usage['quantity_used'];
+
+                $unitPrice = (float) ($part->unit_price ?? 0);
+                $totalPrice = $unitPrice * $qty;
 
                 WorkOrderSparePart::create([
                     'work_order_id' => $workOrder->id,
                     'spare_part_id' => $part->id,
                     'quantity_used' => $qty,
-                    'unit_price' => $part->unit_price,
-                    'total_price' => (float) $part->unit_price * $qty,
+                    'unit_price' => $unitPrice,
+                    'total_price' => $totalPrice,
+                ]);
+
+                TechnicianCompletionReportSparePart::create([
+                    'completion_report_id' => $report->id,
+                    'work_order_id' => $workOrder->id,
+                    'technician_id' => $user->id,
+                    'spare_part_id' => $part->id,
+                    'quantity_used' => $qty,
+                    'unit_price' => $unitPrice,
+                    'total_price' => $totalPrice,
                 ]);
 
                 ActivityLogger::log($user->id, 'inventory', 'record_usage', $part->id, "Recorded {$qty} used for work order #{$workOrder->id}.", $request);
@@ -407,16 +539,18 @@ class TechnicianController extends ModuleController
 
             $this->updateWorkOrderSafe($workOrder, [
                 'work_status' => 'completed',
-                'completion_note' => $validated['completion_note'] ?? null,
+                'completion_note' => $completionNoteColumn,
                 'problem_found' => $validated['problem_found'] ?? null,
                 'action_taken' => $validated['action_taken'] ?? null,
-                'delay_reason' => $validated['delay_reason'] ?? $workOrder->delay_reason,
+                'delay_reason' => $resolvedDelayReason !== '' ? $resolvedDelayReason : $workOrder->delay_reason,
                 'completed_by_technician_at' => $now,
                 'completed_at' => $now,
                 'status_updated_at' => $now,
             ]);
 
             $this->logWorkOrderStatusChange($workOrder, $user->id, $oldStatus, 'completed', 'Technician submitted completion details.');
+
+            $report->refresh();
 
             if ($workOrder->request) {
                 $oldRequestStatus = $workOrder->request->status;
@@ -445,18 +579,24 @@ class TechnicianController extends ModuleController
                     "Maintenance request #{$this->requestCode((int) $workOrder->request->id)} has been completed. Please verify and close the request."
                 );
 
-                if (!empty($validated['delay_reason'])) {
+                if ($resolvedDelayReason !== '') {
                     $this->notifyRole(
                         'supervisor',
                         'request_delay_reported',
                         'work_order',
                         $workOrder->request->id,
-                        "Delay reported for Request #{$workOrder->request->id}: {$validated['delay_reason']}"
+                        "Delay reported for Request #{$workOrder->request->id}: {$resolvedDelayReason}"
                     );
                 }
 
-                if ($request->hasFile('image')) {
-                    $path = $request->file('image')->store('request-images', 'public');
+                $pathsForRequest = array_filter(array_merge(
+                    is_array($report->attachment_paths) ? $report->attachment_paths : [],
+                    $report->image_path && !in_array($report->image_path, is_array($report->attachment_paths) ? $report->attachment_paths : [], true)
+                        ? [$report->image_path]
+                        : []
+                ));
+
+                foreach (array_unique($pathsForRequest) as $path) {
                     RequestImage::create([
                         'request_id' => $workOrder->request->id,
                         'image_path' => $path,
@@ -468,10 +608,13 @@ class TechnicianController extends ModuleController
 
         ActivityLogger::log($user->id, 'work_order', 'complete', $workOrder->id, "Work order #{$workOrder->id} completed.", $request);
 
+        $detail = $this->freshWorkOrderDetail($workOrder);
+        $detail->setAttribute('similar_completion_cases', SimilarCompletionCases::forWorkOrder($detail));
+
         return response()->json([
             'success' => true,
             'message' => 'Work order completed and sent for requester verification.',
-            'work_order' => $this->freshWorkOrderDetail($workOrder),
+            'work_order' => $detail,
         ]);
     }
 
@@ -604,14 +747,17 @@ class TechnicianController extends ModuleController
     private function workOrderDetailRelations(): array
     {
         $relations = [
-            'request:id,title,description,priority,status,due_date,created_at,category_id,building_id,room_id,requester_id',
+            'request:id,title,description,priority,status,due_date,created_at,category_id,asset_id,building_id,room_id,requester_id',
             'request.category:id,name',
             'request.building:id,name',
             'request.room:id,name',
             'request.requester:id,fname,lname,phone',
-            'request.messages' => fn ($q) => $q->whereNull('deleted_at')->with('sender:id,fname,lname')->oldest(),
             'request.images',
+            'request.statusLogs' => fn ($q) => $q->with('changedBy:id,fname,lname')->orderByDesc('created_at'),
             'spareParts.sparePart',
+            'technicianProgressNotes' => fn ($q) => $q->orderBy('created_at'),
+            'technicianCompletionReport.spareParts.sparePart',
+            'technicianCompletionReport.technician:id,fname,lname',
         ];
 
         if (Schema::hasTable('technician_ratings')) {
@@ -671,6 +817,8 @@ class TechnicianController extends ModuleController
         }
 
         UserNotification::create($payload);
+        $recipient = User::query()->find($userId);
+        EmailNotifier::sendToUser($recipient, 'CMMS Notification', $message);
     }
 
     private function requestCode(int $id): string

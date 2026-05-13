@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { Package, Shapes, ShieldAlert } from "lucide-react";
+import { DollarSign, Package, Shapes, ShieldAlert } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
 import {
@@ -20,6 +20,7 @@ type DashboardResponse = {
     total_parts: number;
     categories: number;
     low_stock: number;
+    total_inventory_value: number;
   };
   recent_requests: PartRequestRecord[];
 };
@@ -66,11 +67,11 @@ export default function DashboardPage() {
         </p>
         <h1 className="text-4xl font-black tracking-tight text-slate-900">Dashboard</h1>
         <p className="max-w-2xl text-sm font-medium text-slate-500">
-          Quick view of spare part stock, categories, low stock alerts, and the five most recent requests.
+          Quick view of spare part stock, categories, total inventory cost, low stock alerts, and the five most recent requests.
         </p>
       </header>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Total Parts"
           value={summary?.total_parts ?? 0}
@@ -82,6 +83,13 @@ export default function DashboardPage() {
           value={summary?.categories ?? 0}
           icon={<Shapes size={18} />}
           tone="bg-blue-600 text-white"
+        />
+        <StatCard
+          label="Total Cost"
+          value={summary?.total_inventory_value ?? 0}
+          icon={<DollarSign size={18} />}
+          tone="bg-emerald-600 text-white"
+          formatter={formatCurrency}
         />
         <StatCard
           label="Low Stock"
@@ -123,11 +131,13 @@ function StatCard({
   value,
   tone,
   icon,
+  formatter,
 }: {
   label: string;
   value: number;
   tone: string;
   icon: ReactNode;
+  formatter?: (value: number) => string;
 }) {
   return (
     <div className={`rounded-[2rem] p-6 shadow-sm ${tone}`}>
@@ -135,9 +145,13 @@ function StatCard({
         <div className="rounded-xl bg-white/10 p-2">{icon}</div>
         <p className="text-[10px] font-black uppercase tracking-[0.25em] opacity-70 text-right">{label}</p>
       </div>
-      <p className="mt-6 text-4xl font-black tracking-tight">{value}</p>
+      <p className="mt-6 text-4xl font-black tracking-tight">{formatter ? formatter(value) : value}</p>
     </div>
   );
+}
+
+function formatCurrency(value: number) {
+  return Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
 function RequestRow({ request }: { request: PartRequestRecord }) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "@/lib/api";
@@ -38,6 +38,10 @@ export default function RecordRequestPage() {
   const [busy, setBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<"form" | "queue">("form");
   const [queueFilter, setQueueFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [workOrderSearch, setWorkOrderSearch] = useState("");
+  const [technicianSearch, setTechnicianSearch] = useState("");
+  const [showWorkOrderDropdown, setShowWorkOrderDropdown] = useState(false);
+  const [showTechnicianDropdown, setShowTechnicianDropdown] = useState(false);
   const [form, setForm] = useState({
     work_order_id: "",
     technician_id: "",
@@ -87,6 +91,32 @@ export default function RecordRequestPage() {
   const selectedWorkOrder = meta?.work_orders.find((wo) => String(wo.id) === form.work_order_id) ?? null;
   const selectedPart = meta?.spare_parts.find((p) => String(p.id) === form.part_id) ?? null;
   const selectedTechnician = meta?.technicians.find((t) => String(t.id) === form.technician_id) ?? null;
+  const filteredWorkOrders = useMemo(() => {
+    const term = workOrderSearch.trim().toLowerCase();
+    return (meta?.work_orders ?? []).filter((wo) => {
+      if (!term) return true;
+      const hay = `#${wo.id} ${wo.request?.title ?? ""}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [meta?.work_orders, workOrderSearch]);
+  const filteredTechnicians = useMemo(() => {
+    const term = technicianSearch.trim().toLowerCase();
+    return (meta?.technicians ?? []).filter((tech) => {
+      if (!term) return true;
+      const hay = `${tech.fname ?? ""} ${tech.lname ?? ""} ${tech.phone ?? ""}`.toLowerCase();
+      return hay.includes(term);
+    });
+  }, [meta?.technicians, technicianSearch]);
+
+  useEffect(() => {
+    if (!selectedWorkOrder) return;
+    setWorkOrderSearch(`#${selectedWorkOrder.id} ${selectedWorkOrder.request?.title ?? ""}`.trim());
+  }, [selectedWorkOrder?.id, selectedWorkOrder?.request?.title]);
+
+  useEffect(() => {
+    if (!selectedTechnician) return;
+    setTechnicianSearch(`${selectedTechnician.fname ?? ""} ${selectedTechnician.lname ?? ""}`.trim());
+  }, [selectedTechnician?.id, selectedTechnician?.fname, selectedTechnician?.lname]);
   
   const requestedQuantity = Number(form.quantity || 0);
   const availableQuantity = Number(selectedPart?.quantity_available ?? 0);
@@ -186,19 +216,86 @@ export default function RecordRequestPage() {
           )}
 
           <div className="grid md:grid-cols-2 gap-6">
-            <SelectField label="Link Work Order" required value={form.work_order_id} onChange={(v) => setForm({...form, work_order_id: v})}>
-              <option value="">Choose an active order</option>
-              {meta?.work_orders.map(wo => (
-                <option key={wo.id} value={wo.id}>#{wo.id} {wo.request?.title}</option>
-              ))}
-            </SelectField>
+            <div className="space-y-2 relative">
+              <InputField
+                label="Work Order"
+                required
+                value={workOrderSearch}
+                placeholder="Type work order id or title..."
+                onFocus={() => setShowWorkOrderDropdown(true)}
+                onBlur={() => window.setTimeout(() => setShowWorkOrderDropdown(false), 120)}
+                onChange={(value) => {
+                  setWorkOrderSearch(value);
+                  setShowWorkOrderDropdown(true);
+                  setForm((prev) => ({ ...prev, work_order_id: "" }));
+                }}
+              />
+              {showWorkOrderDropdown && (
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
+                  {filteredWorkOrders.length === 0 ? (
+                    <p className="px-4 py-3 text-sm font-semibold text-slate-400">No matching work orders.</p>
+                  ) : (
+                    filteredWorkOrders.map((wo) => (
+                      <button
+                        key={wo.id}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          setForm((prev) => ({ ...prev, work_order_id: String(wo.id) }));
+                          setWorkOrderSearch(`#${wo.id} ${wo.request?.title ?? ""}`.trim());
+                          setShowWorkOrderDropdown(false);
+                        }}
+                        className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                      >
+                        #{wo.id} {wo.request?.title ?? "Untitled"}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+              <input required type="hidden" value={form.work_order_id} />
+            </div>
 
-            <SelectField label="Technician" required value={form.technician_id} onChange={(v) => setForm({...form, technician_id: v})}>
-              <option value="">Select personnel</option>
-              {meta?.technicians.map(t => (
-                <option key={t.id} value={t.id}>{t.fname} {t.lname}</option>
-              ))}
-            </SelectField>
+            <div className="space-y-2 relative">
+              <InputField
+                label="Technician"
+                required
+                value={technicianSearch}
+                placeholder="Type technician name..."
+                onFocus={() => setShowTechnicianDropdown(true)}
+                onBlur={() => window.setTimeout(() => setShowTechnicianDropdown(false), 120)}
+                onChange={(value) => {
+                  setTechnicianSearch(value);
+                  setShowTechnicianDropdown(true);
+                  setForm((prev) => ({ ...prev, technician_id: "" }));
+                }}
+              />
+              {showTechnicianDropdown && (
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
+                  {filteredTechnicians.length === 0 ? (
+                    <p className="px-4 py-3 text-sm font-semibold text-slate-400">No matching technicians.</p>
+                  ) : (
+                    filteredTechnicians.map((tech) => (
+                      <button
+                        key={tech.id}
+                        type="button"
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          setForm((prev) => ({ ...prev, technician_id: String(tech.id) }));
+                          setTechnicianSearch(`${tech.fname ?? ""} ${tech.lname ?? ""}`.trim());
+                          setShowTechnicianDropdown(false);
+                        }}
+                        className="block w-full border-b border-slate-100 px-4 py-3 text-left text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                      >
+                        {tech.fname} {tech.lname}
+                        {tech.phone ? <span className="ml-2 text-xs text-slate-400">({tech.phone})</span> : null}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+              <input required type="hidden" value={form.technician_id} />
+            </div>
 
             <SelectField label="Spare Part" required value={form.part_id} onChange={(v) => setForm({...form, part_id: v})}>
               <option value="">Select component</option>

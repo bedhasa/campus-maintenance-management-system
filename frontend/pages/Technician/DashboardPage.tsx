@@ -1,51 +1,51 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ClipboardList, Clock3, PlayCircle, ChevronRight } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ClipboardList, Clock3, PlayCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
-import { TechnicianDashboardResponse, formatDate, getStatusLabel, getTaskLocation, getTaskTitle } from "./technician-utils";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { TechnicianDashboardResponse, formatDate, getPriorityLabel, getPriorityTone, getStatusLabel, getStatusTone, getTaskLocation, getTaskTitle, TechnicianWorkOrder } from "./technician-utils";
 
 export default function TechnicianDashboardPage() {
   const router = useRouter();
   const [data, setData] = useState<TechnicianDashboardResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<number | null>(null);
+  const [priorityIndex, setPriorityIndex] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await apiRequest<TechnicianDashboardResponse>("/api/technician/dashboard", { method: "GET" }, true);
+      setData(res);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load dashboard.");
+    }
+  }, []);
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        const res = await apiRequest<TechnicianDashboardResponse>("/api/technician/dashboard", { method: "GET" }, true);
-        setData(res);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load dashboard.");
-      }
-    };
-    void run();
-  }, []);
+    void load();
+  }, [load]);
+
+  useLiveRefresh(load, { enabled: true, intervalMs: 8000 });
 
   if (!data && !error) return <PageSkeleton cards={4} rows={4} />;
 
   const recentTasks = (data?.assigned_jobs?.data ?? []).slice(0, 5);
-  const firstAssigned = recentTasks.find((task) => task.work_status === "assigned");
+  const focusTasks = (data?.assigned_jobs?.data ?? []).filter((task) => task.work_status !== "completed");
+  const nextPriorityTask = focusTasks.length > 0 ? focusTasks[priorityIndex % focusTasks.length] : null;
 
-  const startTask = async (taskId?: number) => {
-    const targetId = taskId ?? firstAssigned?.id;
+  const openTask = async (task?: TechnicianWorkOrder | null) => {
+    const targetId = task?.id;
     if (!targetId) {
       router.push("/technician/tasks");
       return;
     }
-    try {
-      setStarting(targetId);
-      await apiRequest(`/api/technician/work-orders/${targetId}/start`, { method: "PATCH" }, true);
-      router.push(`/technician/work-orders/${targetId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start selected task.");
-    } finally {
-      setStarting(null);
-    }
+    setStarting(targetId);
+    router.push(`/technician/work-orders/${targetId}`);
   };
 
   const stats = [
@@ -54,6 +54,16 @@ export default function TechnicianDashboardPage() {
     { label: "Done", value: data?.summary.completed, icon: CheckCircle2, color: "text-emerald-600", bg: "bg-emerald-50" },
     { label: "Delayed", value: data?.summary.overdue, icon: AlertTriangle, color: "text-rose-600", bg: "bg-rose-50" },
   ];
+
+  const cyclePriorityTask = (direction: "prev" | "next") => {
+    if (focusTasks.length <= 1) return;
+    setPriorityIndex((current) => {
+      if (direction === "prev") {
+        return current === 0 ? focusTasks.length - 1 : current - 1;
+      }
+      return current === focusTasks.length - 1 ? 0 : current + 1;
+    });
+  };
 
   return (
     <div className="max-w-2xl mx-auto space-y-6 pb-20 px-1">
@@ -76,22 +86,63 @@ export default function TechnicianDashboardPage() {
           <div>
             <p className="text-blue-100/80 text-xs font-bold uppercase tracking-wider">Next Priority</p>
             <h2 className="mt-1 text-xl font-semibold">
-              {firstAssigned ? getTaskTitle(firstAssigned) : "No Pending Tasks"}
+              {nextPriorityTask ? getTaskTitle(nextPriorityTask) : "No Pending Tasks"}
             </h2>
             <p className="mt-1 text-sm text-blue-100/70">
-              {firstAssigned ? getTaskLocation(firstAssigned) : "You're all caught up!"}
+              {nextPriorityTask ? getTaskLocation(nextPriorityTask) : "You're all caught up!"}
             </p>
+            {nextPriorityTask && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className={`rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${getPriorityTone(nextPriorityTask.request?.priority)} bg-white/95`}>
+                  {getPriorityLabel(nextPriorityTask.request?.priority)}
+                </span>
+                <span className={`rounded-lg border px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${getStatusTone(nextPriorityTask.work_status)} bg-white/95`}>
+                  {getStatusLabel(nextPriorityTask.work_status)}
+                </span>
+              </div>
+            )}
           </div>
-          <PlayCircle className="text-blue-300/50" size={32} />
+          <div className="flex items-center gap-2">
+            {focusTasks.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => cyclePriorityTask("prev")}
+                  className="rounded-xl border border-white/15 bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
+                  aria-label="Previous work order"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => cyclePriorityTask("next")}
+                  className="rounded-xl border border-white/15 bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
+                  aria-label="Next work order"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </>
+            )}
+            <PlayCircle className="text-blue-300/50" size={32} />
+          </div>
         </div>
         
         <button
-          onClick={() => void startTask()}
+          onClick={() => void openTask(nextPriorityTask)}
           disabled={starting !== null}
           className="mt-6 w-full rounded-xl bg-white py-4 text-center text-sm font-bold text-[#003366] transition-transform active:scale-[0.98] disabled:opacity-70"
         >
-          {starting ? "Starting..." : firstAssigned ? "Start Work Now" : "View All Tasks"}
+          {starting
+            ? "Opening..."
+            : !nextPriorityTask
+              ? "View All Tasks"
+              : "Open Work Order Details"}
         </button>
+        {focusTasks.length > 1 && (
+          <p className="mt-3 text-center text-[10px] font-bold uppercase tracking-widest text-blue-100/70">
+            {priorityIndex + 1} of {focusTasks.length}
+          </p>
+        )}
       </div>
 
       {/* Stats Grid - Cleaner 2x2 for mobile */}

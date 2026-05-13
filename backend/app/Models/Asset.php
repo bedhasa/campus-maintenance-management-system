@@ -16,6 +16,7 @@ class Asset extends Model
         'room_id',
         'serial_number',
         'status',
+        'image_path',
     ];
 
     public function category()

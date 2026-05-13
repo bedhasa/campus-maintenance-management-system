@@ -56,3 +56,4 @@ Artisan::command('maintenance:process-due', function () {
 })->purpose('Generate due preventive work orders and apply SLA overdue flags.');
 
 Schedule::command('maintenance:process-due')->hourly();
+Schedule::command('alerts:send-operational-emails')->hourly();

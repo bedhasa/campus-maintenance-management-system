@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { 
@@ -25,7 +24,6 @@ type Department = { id: number; name: string; faculty: string };
 type RegisterResponse = {
   success: boolean;
   message: string;
-  otp?: string;
   expires_in?: number;
 };
 
@@ -116,10 +114,19 @@ export default function RegistrationForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!validateStep(3)) {
       setLocalError("Please confirm your security settings.");
       return;
     }
+
+    // --- PASSWORD COMPLEXITY VALIDATION ---
+    const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!passwordRegex.test(formData.password)) {
+      setLocalError("Password must be 8+ characters, include 1 uppercase, 1 number, and 1 special character.");
+      return;
+    }
+
     const idRegex = /^((NaScR|SoScR)\/\d{4}\/\d{2})|(SIA\/\d{4})$/;
     if (!idRegex.test(formData.university_id_number)) {
       setLocalError("Invalid University ID format.");
@@ -155,12 +162,10 @@ export default function RegistrationForm() {
         false
       );
 
-      const otpQuery = data.otp ? `&dev_otp=${encodeURIComponent(data.otp)}` : "";
-      const successText = data.otp
-        ? `${data.message || "OTP generated (DEV MODE)"} OTP: ${data.otp}`
-        : (data.message || "OTP generated. Redirecting...");
+      const expiresInMinutes = data.expires_in ? Math.round(data.expires_in / 60) : 5;
+      const successText = `${data.message || "Registration successful."} Please check your email. The OTP will expire in ${expiresInMinutes} minutes.`;
       setSuccessMessage(successText);
-      setTimeout(() => router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}${otpQuery}`), 1200);
+      setTimeout(() => router.push(`/verify-otp?email=${encodeURIComponent(formData.email)}`), 1200);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Registration failed.";
       setLocalError(message);
@@ -179,17 +184,15 @@ export default function RegistrationForm() {
       <div className="w-full max-w-lg">
         {/* Branding */}
         <div className="text-center mb-8">
-  <div className="flex justify-center mt-6">
-    <div className="w-20 h-20 bg-white rounded-2xl shadow-lg overflow-hidden flex items-center justify-center">
-      <Image
-        src="/hawassa-university-logo.png" 
-        alt="Hawassa University Logo" 
-        width={80}
-        height={80}
-        className="w-full h-full object-contain"
+          <div className="flex justify-center mt-6">
+            <div className="w-20 h-20 bg-white rounded-2xl shadow-lg overflow-hidden flex items-center justify-center">
+             <img
+        src="/hu_logo.jpg"
+        alt="Hawassa University Logo"
+        className="block w-full h-full object-cover"
       />
-    </div>
-  </div>
+            </div>
+          </div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Create Account</h1>
         </div>
 
@@ -209,7 +212,6 @@ export default function RegistrationForm() {
 
         <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="p-8">
-            
             <form onSubmit={handleSubmit}>
               {/* STEP 1: Personal */}
               {step === 1 && (
@@ -290,7 +292,11 @@ export default function RegistrationForm() {
                         {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                       </button>
                     </div>
+                    <p className="text-[10px] text-slate-400 mt-1 italic ml-1">
+                      Must contain 8+ characters, 1 Uppercase, 1 Number, and 1 Special Character (@$!%*?&)
+                    </p>
                   </div>
+                  
                   <div className="space-y-1.5">
                     <label className="text-xs font-bold text-slate-700 ml-1" htmlFor="password_confirmation">Confirm Password</label>
                     <div className="relative">

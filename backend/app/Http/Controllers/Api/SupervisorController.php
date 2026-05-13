@@ -11,16 +11,20 @@ use App\Models\Building;
 use App\Models\Category;
 use App\Models\Department;
 use App\Models\PartIssue;
+use App\Support\SimilarCompletionCases;
 use App\Models\SparePart;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WorkOrder;
 use App\Models\WorkOrderSparePart;
+use App\Models\WorkOrderStatusLog;
 use App\Services\ActivityLogger;
+use App\Services\EmailNotifier;
 use App\Support\SlaResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -415,19 +419,186 @@ class SupervisorController extends ModuleController
         $this->authorizeRoles($request, ['supervisor', 'admin']);
         $workOrder = WorkOrder::query()
             ->with([
-                'request:id,title,description,status,priority,due_date,building_id,room_id,asset_id,category_id',
+                'request:id,title,description,status,priority,due_date,building_id,room_id,asset_id,category_id,requester_id',
                 'request.building:id,name',
                 'request.room:id,name',
                 'request.asset:id,name',
                 'request.category:id,name',
+                'request.requester:id,fname,lname,phone,email,profile_picture',
                 'assignee:id,fname,lname,phone,email',
                 'spareParts.sparePart',
+                'technicianCompletionReport.spareParts.sparePart',
+                'technicianCompletionReport.technician:id,fname,lname',
+                'statusLogs' => fn ($q) => $q->with('changedBy:id,fname,lname')->orderByDesc('created_at'),
             ])
             ->findOrFail($id);
+
+        if ($workOrder->request?->requester) {
+            $workOrder->request->requester->setAttribute(
+                'profile_picture_url',
+                $this->profilePictureUrl($workOrder->request->requester->profile_picture)
+            );
+        }
+
+        $workOrder->setAttribute('similar_completion_cases', SimilarCompletionCases::forWorkOrder($workOrder));
 
         return response()->json([
             'success' => true,
             'work_order' => $workOrder,
+        ]);
+    }
+
+    public function reassignWorkOrder(Request $request, int $id): JsonResponse
+    {
+        $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $workOrder = WorkOrder::query()->with('request')->findOrFail($id);
+
+        if (!in_array($workOrder->work_status, ['draft', 'assigned', 'in_progress'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only draft/assigned/in-progress work orders can be reassigned.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'assigned_to' => ['required', 'integer', 'exists:users,id'],
+            'start_date' => ['nullable', 'date'],
+            'finish_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+            'scheduled_time' => ['nullable', 'date_format:H:i'],
+        ]);
+
+        $technician = User::query()
+            ->whereHas('roles', fn ($q) => $q->where('name', 'technician'))
+            ->findOrFail((int) $validated['assigned_to']);
+
+        $previousAssigneeId = $workOrder->assigned_to ? (int) $workOrder->assigned_to : null;
+        $newAssigneeId = (int) $technician->id;
+        if ($previousAssigneeId === $newAssigneeId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This technician is already assigned.',
+            ], 422);
+        }
+
+        $startDate = $validated['start_date'] ?? $workOrder->scheduled_date;
+        $finishDate = $validated['finish_date'] ?? null;
+
+        $workOrder->update([
+            'assigned_to' => $newAssigneeId,
+            'scheduled_date' => $startDate,
+            'scheduled_time' => $validated['scheduled_time'] ?? $workOrder->scheduled_time,
+            'work_status' => 'assigned',
+        ]);
+
+        if ($workOrder->request) {
+            $requestTicket = $workOrder->request;
+            $oldStatus = $requestTicket->status;
+            $requestTicket->update([
+                'status' => 'assigned',
+                'due_date' => $finishDate ?? $requestTicket->due_date,
+            ]);
+
+            RequestStatusLog::create([
+                'request_id' => $requestTicket->id,
+                'changed_by' => $user->id,
+                'old_status' => $oldStatus,
+                'new_status' => 'assigned',
+                'comment' => "Reassigned from technician #{$previousAssigneeId} to #{$newAssigneeId}.",
+            ]);
+
+            if ($requestTicket->requester_id) {
+                $this->notifyRequester(
+                    $requestTicket,
+                    'request_reassigned',
+                    "Your maintenance request #{$this->requestCode($requestTicket->id)} has been reassigned to a technician.",
+                    'request'
+                );
+            }
+        }
+
+        if ($previousAssigneeId) {
+            $this->notifyTechnician(
+                $previousAssigneeId,
+                'work_order_reassigned',
+                "Work order #{$workOrder->id} has been reassigned to another technician.",
+                $workOrder->request_id ?? $workOrder->id
+            );
+        }
+
+        $this->notifyTechnician(
+            $newAssigneeId,
+            'work_order_assigned',
+            "You have been assigned work order #{$workOrder->id}.",
+            $workOrder->request_id ?? $workOrder->id
+        );
+
+        ActivityLogger::log(
+            $user->id,
+            'assignment',
+            'reassign_work_order',
+            $workOrder->id,
+            "Work order #{$workOrder->id} reassigned to technician #{$newAssigneeId}.",
+            $request
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Work order reassigned.',
+            'work_order' => $workOrder->fresh(['assignee:id,fname,lname,phone,email']),
+        ]);
+    }
+
+    public function closeManualWorkOrder(Request $request, int $id): JsonResponse
+    {
+        $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $workOrder = WorkOrder::query()->findOrFail($id);
+
+        if ($workOrder->request_id !== null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Linked request work orders must be closed from the maintenance request.',
+            ], 422);
+        }
+
+        if ($workOrder->work_status !== 'completed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only completed manual work orders can be closed.',
+            ], 422);
+        }
+
+        $workOrder->update([
+            'status_updated_at' => now(),
+        ]);
+
+        if (Schema::hasTable('work_order_status_logs')) {
+            WorkOrderStatusLog::create([
+                'work_order_id' => $workOrder->id,
+                'changed_by' => $user->id,
+                'old_status' => $workOrder->work_status,
+                'new_status' => $workOrder->work_status,
+                'comment' => 'Manual work order approved and closed by supervisor.',
+            ]);
+        }
+
+        ActivityLogger::log($user->id, 'work_order', 'close', $workOrder->id, "Manual work order #{$workOrder->id} closed.", $request);
+
+        if ($workOrder->assigned_to) {
+            $this->notifyTechnician(
+                (int) $workOrder->assigned_to,
+                'work_order_closed',
+                "Manual work order #{$workOrder->id} has been approved and closed by the supervisor.",
+                $workOrder->id
+            );
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Manual work order closed.',
+            'work_order' => $workOrder->fresh([
+                'assignee:id,fname,lname,phone,email',
+                'statusLogs' => fn ($q) => $q->with('changedBy:id,fname,lname')->orderByDesc('created_at'),
+            ]),
         ]);
     }
 
@@ -549,6 +720,66 @@ class SupervisorController extends ModuleController
         ]);
     }
 
+    public function undoReview(Request $request, int $id): JsonResponse
+    {
+        $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $ticket = MaintenanceRequest::query()->findOrFail($id);
+
+        if (!in_array($ticket->status, ['approved', 'rejected'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only approved or rejected requests can be undone.',
+            ], 422);
+        }
+
+        if ($ticket->status === 'approved' && $ticket->workOrders()->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Review cannot be undone after assignment has started.',
+            ], 422);
+        }
+
+        $oldStatus = $ticket->status;
+        $undoPayload = ['status' => 'submitted'];
+        if (Schema::hasColumn('maintenance_requests', 'due_date')) {
+            $undoPayload['due_date'] = null;
+        }
+        if (Schema::hasColumn('maintenance_requests', 'sla_hours')) {
+            $undoPayload['sla_hours'] = null;
+        }
+        $ticket->update($undoPayload);
+
+        RequestStatusLog::create([
+            'request_id' => $ticket->id,
+            'changed_by' => $user->id,
+            'old_status' => $oldStatus,
+            'new_status' => 'submitted',
+            'comment' => 'Supervisor undid the previous review decision.',
+        ]);
+
+        ActivityLogger::log(
+            $user->id,
+            'request_review',
+            'undo',
+            $ticket->id,
+            "Review decision undone for request #{$ticket->id}.",
+            $request
+        );
+
+        $this->notifyRequester(
+            $ticket,
+            'request_review_undone',
+            "Supervisor reopened request #{$this->requestCode($ticket->id)} for fresh review.",
+            'request'
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Review decision undone. Request is pending again.',
+            'request' => $ticket->fresh(),
+        ]);
+    }
+
     public function techniciansForCategory(Request $request): JsonResponse
     {
         $this->authorizeRoles($request, ['supervisor', 'admin']);
@@ -586,15 +817,17 @@ class SupervisorController extends ModuleController
         $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
         $ticket = MaintenanceRequest::query()->findOrFail($id);
 
-        if ($ticket->status !== 'approved') {
+        if (!in_array($ticket->status, ['approved', 'assigned', 'in_progress'], true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Assignment is allowed only after approval.',
+                'message' => 'Assignment is allowed for approved or assigned requests.',
             ], 422);
         }
 
         $validated = $request->validate([
             'assigned_to' => ['required', 'integer', 'exists:users,id'],
+            'start_date' => ['nullable', 'date'],
+            'finish_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'scheduled_date' => ['nullable', 'date'],
             'scheduled_time' => ['nullable', 'date_format:H:i'],
             'estimated_hours' => ['nullable', 'numeric', 'min:0.25'],
@@ -620,13 +853,20 @@ class SupervisorController extends ModuleController
             }
         }
 
+        $existingWorkOrder = WorkOrder::query()->where('request_id', $ticket->id)->first();
+        $previousAssigneeId = $existingWorkOrder?->assigned_to ? (int) $existingWorkOrder->assigned_to : null;
+        $targetAssigneeId = (int) $validated['assigned_to'];
+        $isReassignment = $previousAssigneeId !== null && $previousAssigneeId !== $targetAssigneeId;
+        $startDate = $validated['start_date'] ?? $validated['scheduled_date'] ?? null;
+        $finishDate = $validated['finish_date'] ?? null;
+
         $workOrder = WorkOrder::query()->updateOrCreate(
             ['request_id' => $ticket->id],
             [
                 'created_by' => $user->id,
-                'assigned_to' => $validated['assigned_to'],
+                'assigned_to' => $targetAssigneeId,
                 'priority' => $validated['priority'] ?? $ticket->priority,
-                'scheduled_date' => $validated['scheduled_date'] ?? null,
+                'scheduled_date' => $startDate,
                 'scheduled_time' => $validated['scheduled_time'] ?? null,
                 'estimated_hours' => $validated['estimated_hours'] ?? null,
                 'work_status' => 'assigned',
@@ -634,42 +874,62 @@ class SupervisorController extends ModuleController
         );
 
         $oldStatus = $ticket->status;
-        $ticket->update(['status' => 'assigned']);
+        $ticket->update([
+            'status' => 'assigned',
+            'due_date' => $finishDate ?? $ticket->due_date,
+        ]);
 
         RequestStatusLog::create([
             'request_id' => $ticket->id,
             'changed_by' => $user->id,
             'old_status' => $oldStatus,
             'new_status' => 'assigned',
-            'comment' => "Assigned to technician #{$validated['assigned_to']}.",
+            'comment' => $isReassignment
+                ? "Reassigned to technician #{$targetAssigneeId}."
+                : "Assigned to technician #{$targetAssigneeId}.",
         ]);
 
         ActivityLogger::log(
             $user->id,
             'assignment',
-            'assign',
+            $isReassignment ? 'reassign' : 'assign',
             $workOrder->id,
-            "Request #{$ticket->id} assigned to technician #{$validated['assigned_to']}.",
+            $isReassignment
+                ? "Request #{$ticket->id} reassigned to technician #{$targetAssigneeId}."
+                : "Request #{$ticket->id} assigned to technician #{$targetAssigneeId}.",
             $request
         );
 
+        if ($isReassignment && $previousAssigneeId) {
+            $this->notifyTechnician(
+                $previousAssigneeId,
+                'work_order_reassigned',
+                "Request #{$this->requestCode($ticket->id)} has been reassigned to another technician.",
+                $ticket->id
+            );
+        }
+
         $this->notifyTechnician(
-            $validated['assigned_to'],
+            $targetAssigneeId,
             'work_order_assigned',
-            "You have been assigned maintenance request #{$this->requestCode($ticket->id)}.",
+            $isReassignment
+                ? "You have been reassigned maintenance request #{$this->requestCode($ticket->id)}."
+                : "You have been assigned maintenance request #{$this->requestCode($ticket->id)}.",
             $ticket->id
         );
 
         $this->notifyRequester(
             $ticket,
-            'request_assigned',
-            "Your maintenance request #{$this->requestCode($ticket->id)} has been approved and assigned to a technician.",
+            $isReassignment ? 'request_reassigned' : 'request_assigned',
+            $isReassignment
+                ? "Your maintenance request #{$this->requestCode($ticket->id)} has been reassigned to a technician."
+                : "Your maintenance request #{$this->requestCode($ticket->id)} has been approved and assigned to a technician.",
             'request'
         );
 
         return response()->json([
             'success' => true,
-            'message' => 'Work order assigned.',
+            'message' => $isReassignment ? 'Work order reassigned.' : 'Work order assigned.',
             'work_order' => $workOrder->fresh(['assignee:id,fname,lname,phone']),
         ]);
     }
@@ -705,6 +965,16 @@ class SupervisorController extends ModuleController
             "Request #{$this->requestCode($ticket->id)} has been closed. You can now provide feedback and a rating.",
             'request'
         );
+
+        $latestWorkOrder = $ticket->workOrders()->latest('id')->first();
+        if ($latestWorkOrder?->assigned_to) {
+            $this->notifyTechnician(
+                (int) $latestWorkOrder->assigned_to,
+                'work_order_closed',
+                "Work order for request #{$this->requestCode($ticket->id)} has been closed by supervisor.",
+                $ticket->id
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -832,8 +1102,13 @@ class SupervisorController extends ModuleController
 
     public function analytics(Request $request): JsonResponse
     {
-        $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
         [$from, $to, $query, $validated] = $this->filteredRequestQuery($request);
+        $cacheKey = 'supervisor:analytics:' . $user->id . ':' . md5($request->fullUrl());
+        $cachedPayload = Cache::get($cacheKey);
+        if (is_array($cachedPayload)) {
+            return response()->json($cachedPayload);
+        }
 
         $total = (clone $query)->count();
         $approved = (clone $query)->where('status', 'approved')->count();
@@ -842,7 +1117,7 @@ class SupervisorController extends ModuleController
         $overdue = (clone $query)
             ->whereNotNull('due_date')
             ->where('due_date', '<', now())
-            ->whereNotIn('status', ['completed', 'closed', 'rejected'])
+            ->whereNotIn('status', ['completed', 'closed', 'rejected', 'cancelled'])
             ->count();
 
         $reviewed = $approved + $rejected;
@@ -874,7 +1149,7 @@ class SupervisorController extends ModuleController
             ->selectRaw("SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved")
             ->selectRaw("SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected")
             ->selectRaw("SUM(CASE WHEN status IN ('completed','closed') THEN 1 ELSE 0 END) as completed")
-            ->selectRaw("SUM(CASE WHEN due_date IS NOT NULL AND due_date < NOW() AND status NOT IN ('completed','closed','rejected') THEN 1 ELSE 0 END) as overdue")
+            ->selectRaw("SUM(CASE WHEN due_date IS NOT NULL AND due_date < NOW() AND status NOT IN ('completed','closed','rejected','cancelled') THEN 1 ELSE 0 END) as overdue")
             ->groupBy('date')
             ->orderBy('date')
             ->get()
@@ -895,15 +1170,18 @@ class SupervisorController extends ModuleController
             ['name' => 'In Progress', 'key' => 'in_progress', 'total' => (clone $query)->where('status', 'in_progress')->count()],
             ['name' => 'Completed', 'key' => 'completed', 'total' => $completed],
             ['name' => 'Rejected', 'key' => 'rejected', 'total' => $rejected],
+            ['name' => 'Cancelled', 'key' => 'cancelled', 'total' => (clone $query)->where('status', 'cancelled')->count()],
         ])->map(fn ($item) => [
             ...$item,
             'percentage' => $total > 0 ? round(($item['total'] / $total) * 100, 2) : 0.0,
         ])->values();
 
+        $priorityDistribution = $this->buildPriorityDistribution((clone $query), $total);
         $byDepartment = $this->groupRequestDimension((clone $query), 'department_id', 'department', $total);
         $byCategory = $this->groupRequestDimension((clone $query), 'category_id', 'category', $total);
         $byBuilding = $this->groupRequestDimension((clone $query), 'building_id', 'building', $total);
         $byAsset = $this->groupRequestDimension((clone $query), 'asset_id', 'asset', $total);
+        $monthlyPerformance = $this->buildMonthlyPerformanceTrend((clone $query), $from, $to);
 
         $periodDays = max(1, $from->diffInDays($to) + 1);
         $prevTo = $from->copy()->subSecond();
@@ -958,6 +1236,16 @@ class SupervisorController extends ModuleController
             ->selectRaw('AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)) as avg_hours')
             ->value('avg_hours');
 
+        $reliabilityMetrics = $this->buildReliabilityMetrics($from, $to, $validated);
+        $selectedDepartmentTrend = $this->buildDimensionTrend($from, $to, $validated, 'department_id', 'department', $validated['department_id'] ?? null);
+        $selectedCategoryTrend = $this->buildDimensionTrend($from, $to, $validated, 'category_id', 'category', $validated['category_id'] ?? null);
+        $selectedBuildingTrend = $this->buildDimensionTrend($from, $to, $validated, 'building_id', 'building', $validated['building_id'] ?? null);
+        $selectedAssetTrend = $this->buildDimensionTrend($from, $to, $validated, 'asset_id', 'asset', $validated['asset_id'] ?? null);
+        $buildingFailureHotspot = $this->buildHighestFailureRateBuilding($byBuilding);
+        $topAssetRow = $byAsset->first();
+        $assetFailureFocus = $validated['asset_id'] ?? ($topAssetRow['id'] ?? null);
+        $assetFailureTrend = $this->buildDimensionTrend($from, $to, $validated, 'asset_id', 'asset', $assetFailureFocus);
+
         $kpis = [
             'total' => ['value' => (int) $total, 'percentage' => 100.0],
             'approved' => ['value' => (int) $approved, 'percentage' => $total > 0 ? round(($approved / $total) * 100, 2) : 0.0],
@@ -966,7 +1254,7 @@ class SupervisorController extends ModuleController
             'overdue' => ['value' => (int) $overdue, 'percentage' => $overdueRate],
         ];
 
-        return response()->json([
+        $payload = [
             'success' => true,
             'filters' => [
                 'from' => $from->toDateString(),
@@ -979,7 +1267,9 @@ class SupervisorController extends ModuleController
             ],
             'kpis' => $kpis,
             'status_distribution' => $statusDistribution,
+            'priority_distribution' => $priorityDistribution,
             'trend' => $trend,
+            'monthly_performance' => $monthlyPerformance,
             'by_department' => $byDepartment,
             'by_category' => $byCategory,
             'by_building' => $byBuilding,
@@ -995,15 +1285,29 @@ class SupervisorController extends ModuleController
                 'on_time_completion_rate' => $slaCompliance,
                 'average_resolution_time_hours' => round((float) ($avgResolution ?? 0), 2),
                 'overdue_count' => (int) $overdue,
+                'first_time_fix_rate' => $reliabilityMetrics['first_time_fix_rate'],
+            ],
+            'reliability' => $reliabilityMetrics,
+            'trend_context' => [
+                'department' => $selectedDepartmentTrend,
+                'category' => $selectedCategoryTrend,
+                'building' => $selectedBuildingTrend,
+                'asset' => $selectedAssetTrend,
+                'asset_failure' => $assetFailureTrend,
             ],
             'insights' => [
                 'department_with_most_issues' => $byDepartment->first(),
                 'category_with_most_issues' => $byCategory->first(),
                 'category_increasing_fastest' => $categoryGrowth->first(fn ($row) => ($row['growth'] ?? 0) > 0),
                 'most_problematic_building' => $byBuilding->first(),
+                'building_with_highest_failure_rate' => $buildingFailureHotspot,
                 'are_we_completing_on_time' => [
                     'value' => $slaCompliance,
                     'label' => $slaCompliance >= 80 ? 'Mostly On Time' : 'Needs Attention',
+                ],
+                'current_sla_compliance' => [
+                    'value' => $slaCompliance,
+                    'label' => $slaCompliance >= 90 ? 'Healthy' : ($slaCompliance >= 80 ? 'Watch Closely' : 'At Risk'),
                 ],
             ],
             'filter_options' => [
@@ -1012,7 +1316,9 @@ class SupervisorController extends ModuleController
                 'categories' => Category::query()->orderBy('name')->get(['id', 'name']),
                 'assets' => Asset::query()->orderBy('name')->get(['id', 'name']),
             ],
-        ]);
+        ];
+        Cache::put($cacheKey, $payload, now()->addMinutes(2));
+        return response()->json($payload);
     }
 
     public function reports(Request $request)
@@ -1022,13 +1328,22 @@ class SupervisorController extends ModuleController
 
         $validated = $request->validate([
             'export' => ['nullable', 'in:pdf,excel,print,copy'],
-            'report_type' => ['nullable', 'in:maintenance_summary,technician_performance,spare_part_usage_cost,asset_report'],
+            'report_type' => ['nullable', 'in:maintenance_summary,technician_performance,spare_part_usage_cost,asset_report,spare_parts_usage,asset_reliability,category_analysis,building_location,department_analysis,preventive_maintenance'],
         ]);
 
         $reportType = $validated['report_type'] ?? 'maintenance_summary';
+        if ($reportType === 'spare_parts_usage') {
+            $reportType = 'spare_part_usage_cost';
+        }
+        if ($reportType === 'asset_reliability') {
+            $reportType = 'asset_report';
+        }
         $total = (clone $query)->count();
         $completed = (clone $query)->whereIn('status', ['completed', 'closed'])->count();
         $overdue = (clone $query)->whereNotNull('due_date')->where('due_date', '<', now())->whereNotIn('status', ['completed', 'closed', 'rejected'])->count();
+        $priorityDistribution = $this->buildPriorityDistribution((clone $query), $total);
+        $monthlyPerformance = $this->buildMonthlyPerformanceTrend((clone $query), $from, $to);
+        $reliabilityMetrics = $this->buildReliabilityMetrics($from, $to, $filters);
 
         $avgResolution = WorkOrder::query()
             ->whereNotNull('completed_at')
@@ -1040,7 +1355,11 @@ class SupervisorController extends ModuleController
             'technician_performance' => $this->buildTechnicianPerformanceReport($from, $to, $filters),
             'spare_part_usage_cost' => $this->buildSparePartUsageCostReport($from, $to, $filters),
             'asset_report' => $this->buildAssetReport($from, $to, $filters),
-            default => $this->buildMaintenanceSummaryReport($query, $total, $completed),
+            'category_analysis' => $this->buildCategoryAnalysisReport($query, $total, $from, $to, $filters),
+            'building_location' => $this->buildBuildingLocationReport($query, $total, $from, $to, $filters),
+            'department_analysis' => $this->buildDepartmentAnalysisReport($query, $total, $from, $to, $filters),
+            'preventive_maintenance' => $this->buildPreventiveMaintenanceReport($from, $to, $filters),
+            default => $this->buildMaintenanceSummaryReport($query, $total, $completed, $from, $to, $filters),
         };
 
         $topDepartments = (clone $query)
@@ -1054,6 +1373,8 @@ class SupervisorController extends ModuleController
             ->values()
             ->all();
 
+        $sparePartIssueQuery = $this->filteredPartIssueQuery($from, $to, $filters);
+
         $summary = [
             'from' => $from,
             'to' => $to,
@@ -1062,8 +1383,11 @@ class SupervisorController extends ModuleController
             'completed_percent' => $total > 0 ? round(($completed / $total) * 100, 2) : 0,
             'overdue_percent' => $total > 0 ? round(($overdue / $total) * 100, 2) : 0,
             'top_departments' => $topDepartments,
-            'spare_part_total_cost' => (float) WorkOrderSparePart::query()->whereBetween('created_at', [$from, $to])->sum('total_price'),
+            'spare_part_total_cost' => (float) (clone $sparePartIssueQuery)->sum('part_issues.total_cost'),
             'average_resolution_time_hours' => round((float) ($avgResolution ?? 0), 2),
+            'priority_distribution' => $priorityDistribution,
+            'monthly_performance' => $monthlyPerformance,
+            'reliability_metrics' => $reliabilityMetrics,
             'report_payload' => $reportPayload,
         ];
 
@@ -1247,10 +1571,13 @@ class SupervisorController extends ModuleController
         ]);
     }
 
-    private function buildMaintenanceSummaryReport($requestQuery, int $total, int $completed): array
+    private function buildMaintenanceSummaryReport($requestQuery, int $total, int $completed, Carbon $from, Carbon $to, array $filters): array
     {
-        $emergencyCount = (clone $requestQuery)->whereIn('priority', ['emergency', 'high', 'urgent'])->count();
-        $normalCount = max(0, $total - $emergencyCount);
+        $priorityDistribution = $this->buildPriorityDistribution((clone $requestQuery), $total);
+        $highPriorityCount = collect($priorityDistribution)
+            ->whereIn('key', ['high', 'urgent'])
+            ->sum('total');
+        $normalCount = max(0, $total - $highPriorityCount);
 
         $statusKeys = [
             'pending' => ['submitted', 'pending', 'approved'],
@@ -1302,25 +1629,24 @@ class SupervisorController extends ModuleController
             'summary_cards' => [
                 ['label' => 'Total Requests', 'count' => (int) $total, 'percentage' => 100.0],
                 ['label' => 'Completed Requests', 'count' => (int) $completed, 'percentage' => $total > 0 ? round(($completed / $total) * 100, 2) : 0],
-                ['label' => 'Emergency Requests', 'count' => (int) $emergencyCount, 'percentage' => $total > 0 ? round(($emergencyCount / $total) * 100, 2) : 0],
+                ['label' => 'High Priority Requests', 'count' => (int) $highPriorityCount, 'percentage' => $total > 0 ? round(($highPriorityCount / $total) * 100, 2) : 0],
                 ['label' => 'Normal Requests', 'count' => (int) $normalCount, 'percentage' => $total > 0 ? round(($normalCount / $total) * 100, 2) : 0],
             ],
             'request_volume' => [
                 'received' => (int) $total,
                 'completed' => (int) $completed,
                 'completion_rate' => $total > 0 ? round(($completed / $total) * 100, 2) : 0,
-                'emergency_count' => (int) $emergencyCount,
+                'emergency_count' => (int) $highPriorityCount,
                 'normal_count' => (int) $normalCount,
             ],
-            'priority_breakdown' => [
-                ['name' => 'Emergency', 'count' => (int) $emergencyCount, 'percentage' => $total > 0 ? round(($emergencyCount / $total) * 100, 2) : 0],
-                ['name' => 'Normal', 'count' => (int) $normalCount, 'percentage' => $total > 0 ? round(($normalCount / $total) * 100, 2) : 0],
-            ],
+            'priority_breakdown' => $priorityDistribution,
             'status_counts' => $statusCounts,
             'location_highlights' => [
                 'departments' => $topDepartments,
                 'buildings' => $topBuildings,
             ],
+            'monthly_performance' => $this->buildMonthlyPerformanceTrend((clone $requestQuery), $from, $to),
+            'reliability_metrics' => $this->buildReliabilityMetrics($from, $to, $filters),
         ];
     }
 
@@ -1380,6 +1706,11 @@ class SupervisorController extends ModuleController
             'purpose' => 'To track accountability and identify who needs more support or training.',
             'ranked_technicians' => $technicians,
             'sort_options' => ['completion_time', 'volume'],
+            'summary_metrics' => [
+                'technician_count' => count($technicians),
+                'average_resolution_rate' => count($technicians) > 0 ? round(collect($technicians)->avg('resolution_rate'), 2) : 0,
+                'average_pending_load' => count($technicians) > 0 ? round(collect($technicians)->avg('pending_load'), 2) : 0,
+            ],
         ];
     }
 
@@ -1479,6 +1810,10 @@ class SupervisorController extends ModuleController
                 'installed_quantity' => $installedQty,
                 'waste_quantity' => max(0, $issuedQty - $installedQty),
             ],
+            'summary_metrics' => [
+                'records' => $consumptionLog->count(),
+                'average_cost_per_issue' => $consumptionLog->count() > 0 ? round($totalCost / $consumptionLog->count(), 2) : 0,
+            ],
         ];
     }
 
@@ -1507,8 +1842,13 @@ class SupervisorController extends ModuleController
             ->limit(100)
             ->get(['id', 'name', 'category_id', 'building_id', 'serial_number', 'status', 'created_at']);
 
-        $profiles = $assets->map(function ($asset) use ($requestCounts) {
+        $profiles = $assets->map(function ($asset) use ($requestCounts, $from, $to) {
             $failures = (int) ($requestCounts[$asset->id] ?? 0);
+            $resolutionHours = WorkOrder::query()
+                ->whereHas('request', fn ($rq) => $rq->where('asset_id', $asset->id)->whereBetween('created_at', [$from, $to]))
+                ->whereNotNull('completed_at')
+                ->selectRaw('AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)) as avg_hours')
+                ->value('avg_hours');
 
             return [
                 'asset_id' => (int) $asset->id,
@@ -1520,13 +1860,365 @@ class SupervisorController extends ModuleController
                 'repair_history_count' => $failures,
                 'current_condition' => $asset->status === 'active' ? 'Operational' : 'Needs Repair',
                 'replacement_signal' => $failures >= 3 ? 'Replace it' : 'Monitor',
+                'average_resolution_time_hours' => round((float) ($resolutionHours ?? 0), 2),
             ];
         })->values()->all();
 
         return [
             'purpose' => 'Tracking the university physical inventory and its lifespan.',
             'asset_profiles' => $profiles,
+            'reliability_metrics' => $this->buildReliabilityMetrics($from, $to, $filters),
         ];
+    }
+
+    private function buildCategoryAnalysisReport($requestQuery, int $total, Carbon $from, Carbon $to, array $filters): array
+    {
+        $categories = $this->groupRequestDimension(clone $requestQuery, 'category_id', 'category', $total)->all();
+        $costByCategory = $this->filteredPartIssueQuery($from, $to, $filters)
+            ->select('maintenance_requests.category_id', DB::raw('SUM(part_issues.total_cost) as total_cost'))
+            ->groupBy('maintenance_requests.category_id')
+            ->pluck('total_cost', 'maintenance_requests.category_id');
+
+        $rows = collect($categories)->map(fn ($row) => [
+            ...$row,
+            'cost' => round((float) ($costByCategory[$row['id']] ?? 0), 2),
+        ])->values()->all();
+
+        return [
+            'purpose' => 'Shows which maintenance categories create the most work and cost.',
+            'categories' => $rows,
+            'trend' => !empty($filters['category_id'])
+                ? $this->buildDimensionTrend($from, $to, $filters, 'category_id', 'category', $filters['category_id'])
+                : ['id' => null, 'name' => null, 'points' => $this->buildMonthlyPerformanceTrend(clone $requestQuery, $from, $to)],
+            'top_category' => $rows[0] ?? null,
+        ];
+    }
+
+    private function buildBuildingLocationReport($requestQuery, int $total, Carbon $from, Carbon $to, array $filters): array
+    {
+        $buildings = $this->groupRequestDimension(clone $requestQuery, 'building_id', 'building', $total)->all();
+        $costByBuilding = $this->filteredPartIssueQuery($from, $to, $filters)
+            ->select('maintenance_requests.building_id', DB::raw('SUM(part_issues.total_cost) as total_cost'))
+            ->groupBy('maintenance_requests.building_id')
+            ->pluck('total_cost', 'maintenance_requests.building_id');
+
+        $rows = collect($buildings)->map(fn ($row) => [
+            ...$row,
+            'cost' => round((float) ($costByBuilding[$row['id']] ?? 0), 2),
+        ])->values()->all();
+
+        return [
+            'purpose' => 'Highlights the buildings and locations with the highest issue load.',
+            'buildings' => $rows,
+            'trend' => !empty($filters['building_id'])
+                ? $this->buildDimensionTrend($from, $to, $filters, 'building_id', 'building', $filters['building_id'])
+                : ['id' => null, 'name' => null, 'points' => $this->buildMonthlyPerformanceTrend(clone $requestQuery, $from, $to)],
+            'top_building' => $rows[0] ?? null,
+        ];
+    }
+
+    private function buildDepartmentAnalysisReport($requestQuery, int $total, Carbon $from, Carbon $to, array $filters): array
+    {
+        $departments = $this->groupRequestDimension(clone $requestQuery, 'department_id', 'department', $total)->all();
+
+        $topCategories = MaintenanceRequest::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters))
+            ->select('department_id', 'category_id', DB::raw('COUNT(*) as total'))
+            ->groupBy('department_id', 'category_id')
+            ->with(['category:id,name'])
+            ->get()
+            ->groupBy('department_id')
+            ->map(fn ($rows) => $rows->sortByDesc('total')->first());
+
+        $topAssets = MaintenanceRequest::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->whereNotNull('asset_id')
+            ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters))
+            ->select('department_id', 'asset_id', DB::raw('COUNT(*) as total'))
+            ->groupBy('department_id', 'asset_id')
+            ->with(['asset:id,name'])
+            ->get()
+            ->groupBy('department_id')
+            ->map(fn ($rows) => $rows->sortByDesc('total')->first());
+
+        $partStats = PartIssue::query()
+            ->join('work_orders', 'work_orders.id', '=', 'part_issues.work_order_id')
+            ->join('maintenance_requests', 'maintenance_requests.id', '=', 'work_orders.request_id')
+            ->whereBetween('part_issues.issue_date', [$from, $to])
+            ->whereBetween('maintenance_requests.created_at', [$from, $to])
+            ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters))
+            ->select(
+                'maintenance_requests.department_id',
+                'part_issues.part_id',
+                DB::raw("MAX(COALESCE(part_issues.part_name_snapshot, 'Unknown')) as part_name"),
+                DB::raw('SUM(part_issues.quantity_issued) as issued_quantity'),
+                DB::raw('SUM(part_issues.total_cost) as total_cost')
+            )
+            ->groupBy('maintenance_requests.department_id', 'part_issues.part_id')
+            ->get()
+            ->groupBy('department_id');
+
+        $rows = collect($departments)->map(function ($row) use ($topCategories, $topAssets, $partStats) {
+            $departmentId = $row['id'];
+            $departmentParts = collect($partStats[$departmentId] ?? []);
+            $topPart = $departmentParts->sortByDesc('issued_quantity')->first();
+
+            return [
+                ...$row,
+                'top_category' => $topCategories[$departmentId]?->category?->name ?? 'N/A',
+                'top_asset' => $topAssets[$departmentId]?->asset?->name ?? 'N/A',
+                'top_spare_part' => $topPart?->part_name ?? 'N/A',
+                'total_cost' => round((float) $departmentParts->sum('total_cost'), 2),
+            ];
+        })->values()->all();
+
+        return [
+            'purpose' => 'Ranks departments by request volume, dominant issue pattern, and spare-part cost.',
+            'departments' => $rows,
+            'top_department' => $rows[0] ?? null,
+        ];
+    }
+
+    private function filteredPartIssueQuery(Carbon $from, Carbon $to, array $filters)
+    {
+        return PartIssue::query()
+            ->join('work_orders', 'work_orders.id', '=', 'part_issues.work_order_id')
+            ->join('maintenance_requests', 'maintenance_requests.id', '=', 'work_orders.request_id')
+            ->whereBetween('part_issues.issue_date', [$from, $to])
+            ->whereBetween('maintenance_requests.created_at', [$from, $to])
+            ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters));
+    }
+
+    private function buildPreventiveMaintenanceReport(Carbon $from, Carbon $to, array $filters): array
+    {
+        $today = now()->startOfDay();
+        $plans = PreventiveMaintenancePlan::query()
+            ->with(['asset:id,name,building_id', 'asset.building:id,name', 'category:id,name', 'assignee:id,fname,lname'])
+            ->whereBetween('next_due_date', [$from->toDateString(), $to->toDateString()])
+            ->when(!empty($filters['asset_id']), fn ($q) => $q->where('asset_id', $filters['asset_id']))
+            ->when(!empty($filters['category_id']), fn ($q) => $q->where('category_id', $filters['category_id']))
+            ->when(!empty($filters['building_id']), function ($q) use ($filters) {
+                $q->whereHas('asset', fn ($aq) => $aq->where('building_id', $filters['building_id']));
+            })
+            ->orderBy('next_due_date')
+            ->get();
+
+        $rows = $plans->map(function ($plan) use ($today) {
+            $dueDate = $plan->next_due_date ? Carbon::parse($plan->next_due_date) : null;
+            $derivedStatus = $plan->status === 'completed'
+                ? 'completed'
+                : ($dueDate && $dueDate->lt($today) ? 'overdue' : 'scheduled');
+
+            return [
+                'id' => (int) $plan->id,
+                'title' => $plan->title,
+                'asset' => $plan->asset?->name ?? 'Unknown',
+                'building' => $plan->asset?->building?->name ?? 'Unknown',
+                'category' => $plan->category?->name ?? 'General',
+                'priority' => $plan->priority,
+                'frequency' => $plan->frequency_type,
+                'scheduled_date' => optional($plan->next_due_date)->toDateString(),
+                'technician' => trim(($plan->assignee?->fname ?? '') . ' ' . ($plan->assignee?->lname ?? '')) ?: 'Unassigned',
+                'status' => $derivedStatus,
+            ];
+        })->values();
+
+        $scheduledCount = $rows->count();
+        $completedCount = $rows->where('status', 'completed')->count();
+        $overdueCount = $rows->where('status', 'overdue')->count();
+
+        return [
+            'purpose' => 'Tracks preventive schedules, completion discipline, and overdue PM work.',
+            'summary_metrics' => [
+                'scheduled_pm' => $scheduledCount,
+                'completed_pm' => $completedCount,
+                'overdue_pm' => $overdueCount,
+                'compliance_rate' => $scheduledCount > 0 ? round(($completedCount / $scheduledCount) * 100, 2) : 0,
+            ],
+            'pm_tasks' => $rows->all(),
+        ];
+    }
+
+    private function buildPriorityDistribution($query, int $total)
+    {
+        $priorityOrder = ['urgent', 'high', 'medium', 'low'];
+
+        return $query
+            ->select('priority', DB::raw('COUNT(*) as total'))
+            ->groupBy('priority')
+            ->get()
+            ->map(function ($row) use ($total) {
+                $count = (int) $row->total;
+                return [
+                    'name' => ucfirst((string) $row->priority),
+                    'key' => (string) $row->priority,
+                    'total' => $count,
+                    'count' => $count,
+                    'percentage' => $total > 0 ? round(($count / $total) * 100, 2) : 0.0,
+                ];
+            })
+            ->sortBy(fn ($row) => array_search($row['key'], $priorityOrder, true))
+            ->values()
+            ->all();
+    }
+
+    private function buildMonthlyPerformanceTrend($query, Carbon $from, Carbon $to)
+    {
+        return $query
+            ->selectRaw("DATE_FORMAT(created_at, '%Y-%m-01') as month_key")
+            ->selectRaw("DATE_FORMAT(created_at, '%b %Y') as label")
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw("SUM(CASE WHEN status IN ('completed','closed') THEN 1 ELSE 0 END) as completed")
+            ->selectRaw("SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved")
+            ->selectRaw("SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected")
+            ->selectRaw("SUM(CASE WHEN due_date IS NOT NULL AND due_date < NOW() AND status NOT IN ('completed','closed','rejected') THEN 1 ELSE 0 END) as overdue")
+            ->groupBy('month_key', 'label')
+            ->orderBy('month_key')
+            ->get()
+            ->map(function ($row) use ($from, $to) {
+                $reviewed = (int) $row->approved + (int) $row->rejected;
+                $completed = (int) $row->completed;
+                $overdue = (int) $row->overdue;
+                $onTimeCompleted = max(0, $completed - min($completed, $overdue));
+
+                $avgHours = WorkOrder::query()
+                    ->whereNotNull('completed_at')
+                    ->whereHas('request', function ($rq) use ($row, $from, $to) {
+                        $rq->whereBetween('created_at', [$from, $to])
+                            ->whereRaw("DATE_FORMAT(created_at, '%Y-%m-01') = ?", [$row->month_key]);
+                    })
+                    ->selectRaw('AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)) as avg_hours')
+                    ->value('avg_hours');
+
+                return [
+                    'period_start' => $row->month_key,
+                    'label' => $row->label,
+                    'total' => (int) $row->total,
+                    'completed' => $completed,
+                    'approved' => (int) $row->approved,
+                    'rejected' => (int) $row->rejected,
+                    'overdue' => $overdue,
+                    'completion_rate' => (int) $row->total > 0 ? round(($completed / (int) $row->total) * 100, 2) : 0.0,
+                    'approval_rate' => $reviewed > 0 ? round(((int) $row->approved / $reviewed) * 100, 2) : 0.0,
+                    'on_time_completion_rate' => $completed > 0 ? round(($onTimeCompleted / $completed) * 100, 2) : 0.0,
+                    'average_resolution_time_hours' => round((float) ($avgHours ?? 0), 2),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function buildDimensionTrend(Carbon $from, Carbon $to, array $filters, string $field, string $relation, $dimensionId = null): array
+    {
+        $dimensionId = $dimensionId ? (int) $dimensionId : null;
+        if (!$dimensionId) {
+            return [
+                'id' => null,
+                'name' => null,
+                'points' => [],
+            ];
+        }
+
+        $query = MaintenanceRequest::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->tap(function ($q) use ($filters, $field, $dimensionId) {
+                $scopedFilters = $filters;
+                unset($scopedFilters[$field]);
+                $this->applyDimensionFilters($q, $scopedFilters);
+                $q->where($field, $dimensionId);
+            });
+
+        $relationModel = MaintenanceRequest::query()
+            ->with(["{$relation}:id,name"])
+            ->where($field, $dimensionId)
+            ->first();
+
+        $points = $query
+            ->selectRaw("DATE_FORMAT(created_at, '%Y-%m-01') as month_key")
+            ->selectRaw("DATE_FORMAT(created_at, '%b %Y') as label")
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw("SUM(CASE WHEN status IN ('completed','closed') THEN 1 ELSE 0 END) as completed")
+            ->selectRaw("SUM(CASE WHEN due_date IS NOT NULL AND due_date < NOW() AND status NOT IN ('completed','closed','rejected') THEN 1 ELSE 0 END) as overdue")
+            ->groupBy('month_key', 'label')
+            ->orderBy('month_key')
+            ->get()
+            ->map(function ($row) {
+                return [
+                    'label' => $row->label,
+                    'total' => (int) $row->total,
+                    'completed' => (int) $row->completed,
+                    'overdue' => (int) $row->overdue,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'id' => $dimensionId,
+            'name' => $relationModel?->{$relation}?->name ?? 'Unknown',
+            'points' => $points,
+        ];
+    }
+
+    private function buildReliabilityMetrics(Carbon $from, Carbon $to, array $filters): array
+    {
+        $completedOrders = WorkOrder::query()
+            ->whereNotNull('completed_at')
+            ->whereBetween('completed_at', [$from, $to])
+            ->whereHas('request', function ($rq) use ($filters, $from, $to) {
+                $rq->whereBetween('created_at', [$from, $to]);
+                $this->applyDimensionFilters($rq, $filters);
+            });
+
+        $mttr = round((float) ((clone $completedOrders)->selectRaw('AVG(TIMESTAMPDIFF(HOUR, created_at, completed_at)) as avg_hours')->value('avg_hours') ?? 0), 2);
+        $downtime = round((float) ((clone $completedOrders)->selectRaw('SUM(TIMESTAMPDIFF(HOUR, created_at, completed_at)) as total_hours')->value('total_hours') ?? 0), 2);
+
+        $failureEvents = (int) MaintenanceRequest::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->whereNotNull('asset_id')
+            ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters))
+            ->count();
+
+        $periodHours = max(24, $from->diffInHours($to) + 1);
+        $mtbf = round($periodHours / max(1, $failureEvents), 2);
+
+        $completedRequests = MaintenanceRequest::query()
+            ->whereBetween('created_at', [$from, $to])
+            ->whereIn('status', ['completed', 'closed'])
+            ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters));
+
+        $completedRequestCount = (clone $completedRequests)->count();
+        $firstTimeFixCount = (clone $completedRequests)
+            ->withCount('workOrders')
+            ->get()
+            ->filter(fn ($request) => (int) $request->work_orders_count <= 1)
+            ->count();
+
+        return [
+            'mttr_hours' => $mttr,
+            'mtbf_hours' => $mtbf,
+            'downtime_hours' => $downtime,
+            'first_time_fix_rate' => $completedRequestCount > 0 ? round(($firstTimeFixCount / $completedRequestCount) * 100, 2) : 0.0,
+            'failure_events' => $failureEvents,
+        ];
+    }
+
+    private function buildHighestFailureRateBuilding($byBuilding): ?array
+    {
+        $candidate = collect($byBuilding)
+            ->map(function ($row) {
+                $total = (int) ($row['total'] ?? 0);
+                $overdue = (int) ($row['overdue'] ?? 0);
+                return [
+                    ...$row,
+                    'failure_rate' => $total > 0 ? round(($overdue / $total) * 100, 2) : 0.0,
+                ];
+            })
+            ->sortByDesc('failure_rate')
+            ->first();
+
+        return $candidate ?: null;
     }
 
     private function requestCode(int $id): string
@@ -1554,6 +2246,9 @@ class SupervisorController extends ModuleController
             'message' => $message,
             'is_read' => false,
         ]);
+
+        $requester = User::query()->find($ticket->requester_id);
+        EmailNotifier::sendToUser($requester, 'CMMS Notification', $message);
     }
 
     private function notifyTechnician(int $technicianId, string $type, string $message, int $relatedId, string $module = 'work_order'): void
@@ -1567,5 +2262,8 @@ class SupervisorController extends ModuleController
             'message' => $message,
             'is_read' => false,
         ]);
+
+        $technician = User::query()->find($technicianId);
+        EmailNotifier::sendToUser($technician, 'CMMS Notification', $message);
     }
 }

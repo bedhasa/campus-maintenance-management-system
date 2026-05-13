@@ -18,6 +18,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ status, priority }) => {
       [TicketStatus.COMPLETED]: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
       [TicketStatus.CLOSED]: { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-500' },
       [TicketStatus.REJECTED]: { bg: 'bg-rose-50', text: 'text-rose-700', dot: 'bg-rose-500' },
+      [TicketStatus.CANCELLED]: { bg: 'bg-slate-50', text: 'text-slate-600', dot: 'bg-slate-400' },
       [TicketStatus.ON_HOLD]: { bg: 'bg-slate-50', text: 'text-slate-700', dot: 'bg-slate-400' },
     };
 

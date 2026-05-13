@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Bell, User as UserIcon, Menu, LogOut, LayoutDashboard, ClipboardList, History, HelpCircle, FilePlus } from 'lucide-react';
+import { Bell, User as UserIcon, Menu, LogOut, LayoutDashboard, ClipboardList, History, HelpCircle, FilePlus, CalendarClock } from 'lucide-react';
 import { Link, NavLink, useLocation, useNavigate } from '../lib/router-dom-shim';
 import Sidebar from './Sidebar';
 import { User } from '../types';
@@ -151,7 +151,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
           </div>
         </header>
 
-        <main className={`flex-1 overflow-y-auto p-6 md:p-8 ${isTechnician || isRequester ? 'pb-24 md:pb-8' : ''}`}>
+        <main className={`flex-1 overflow-y-auto p-6 md:p-8 ${isTechnician ? 'pb-24 md:pb-8' : ''} ${isRequester ? 'pb-28 md:pb-28' : ''}`}>
           <div className="max-w-7xl mx-auto">
             {children}
           </div>
@@ -159,27 +159,41 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
 
         {isTechnician && (
           <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(15,23,42,0.08)]">
-            <div className="mx-auto grid max-w-2xl grid-cols-2 gap-2 px-3 py-3">
-              <Link
+            <div className="mx-auto grid max-w-2xl grid-cols-4 gap-2 px-3 py-3">
+              <NavLink
                 to={`${basePath}/dashboard`}
-                className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] text-slate-600 active:scale-[0.98]"
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
               >
                 <LayoutDashboard size={18} />
                 <span>Dashboard</span>
-              </Link>
-              <Link
+              </NavLink>
+              <NavLink
                 to={`${basePath}/tasks`}
-                className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-[#003366] px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] text-white active:scale-[0.98]"
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
               >
                 <ClipboardList size={18} />
                 <span>My Tasks</span>
-              </Link>
+              </NavLink>
+              <NavLink
+                to={`${basePath}/pm-tasks`}
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
+              >
+                <CalendarClock size={18} />
+                <span>PM Tasks</span>
+              </NavLink>
+              <NavLink
+                to={`${basePath}/history`}
+                className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-4 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
+              >
+                <History size={18} />
+                <span>History</span>
+              </NavLink>
             </div>
           </footer>
         )}
 
         {isRequester && (
-          <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(15,23,42,0.08)] lg:hidden">
+          <footer className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(15,23,42,0.08)]">
             <div className="mx-auto grid max-w-2xl grid-cols-3 gap-2 px-3 py-3">
               <NavLink
                 to="/requester/dashboard"
@@ -193,21 +207,21 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
                 className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
               >
                 <History size={18} />
-                <span>Track Issue</span>
+                <span>History</span>
               </NavLink>
               <NavLink
                 to="/requester/profile"
                 className={({ isActive }) => `flex flex-col items-center justify-center gap-1 rounded-2xl border px-3 py-3 text-[10px] font-black uppercase tracking-[0.18em] active:scale-[0.98] ${isActive ? 'border-[#003366] bg-[#003366] text-white' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
               >
-                <HelpCircle size={18} />
-                <span>Help &amp; Support</span>
+                <UserIcon size={18} />
+                <span>Profile</span>
               </NavLink>
             </div>
           </footer>
         )}
 
         {isRequester && location.pathname !== '/requester/submit' && (
-          <div className="fixed bottom-24 right-4 z-50 lg:hidden">
+          <div className="fixed bottom-24 right-4 z-50 md:bottom-28 md:right-6">
             <Link
               to="/requester/submit"
               className="group flex items-center gap-3 rounded-full bg-[#003366] px-4 py-3 text-white shadow-2xl shadow-slate-900/25 transition-transform active:scale-95"

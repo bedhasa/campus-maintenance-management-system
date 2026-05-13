@@ -6,6 +6,13 @@ export type AnalyticsPeriod = "today" | "weekly" | "monthly" | "quarterly" | "ye
 export type AnalyticsOption = { id: number; name: string };
 export type AnalyticsKpi = { value: number; percentage: number };
 export type AnalyticsDistribution = { name: string; key: string; total: number; percentage: number };
+export type AnalyticsPriorityDistribution = {
+  name: string;
+  key: string;
+  total: number;
+  count: number;
+  percentage: number;
+};
 export type AnalyticsTrendPoint = {
   date: string;
   total: number;
@@ -33,12 +40,44 @@ export type AnalyticsGrowth = {
   growth_percentage: number;
   percentage: number;
 };
+export type AnalyticsMonthlyPerformancePoint = {
+  period_start: string;
+  label: string;
+  total: number;
+  completed: number;
+  approved: number;
+  rejected: number;
+  overdue: number;
+  completion_rate: number;
+  approval_rate: number;
+  on_time_completion_rate: number;
+  average_resolution_time_hours: number;
+};
+export type AnalyticsDimensionTrend = {
+  id: number | null;
+  name: string | null;
+  points: Array<{
+    label: string;
+    total: number;
+    completed: number;
+    overdue: number;
+  }>;
+};
+export type AnalyticsReliability = {
+  mttr_hours: number;
+  mtbf_hours: number;
+  downtime_hours: number;
+  first_time_fix_rate: number;
+  failure_events: number;
+};
 
 export type AnalyticsResponse = {
   success: boolean;
   kpis: Record<AnalyticsKpiKey, AnalyticsKpi>;
   trend: AnalyticsTrendPoint[];
   status_distribution: AnalyticsDistribution[];
+  priority_distribution: AnalyticsPriorityDistribution[];
+  monthly_performance: AnalyticsMonthlyPerformancePoint[];
   by_department: AnalyticsBreakdown[];
   by_category: AnalyticsBreakdown[];
   by_building: AnalyticsBreakdown[];
@@ -54,13 +93,24 @@ export type AnalyticsResponse = {
     on_time_completion_rate: number;
     average_resolution_time_hours: number;
     overdue_count: number;
+    first_time_fix_rate: number;
+  };
+  reliability: AnalyticsReliability;
+  trend_context: {
+    department: AnalyticsDimensionTrend;
+    category: AnalyticsDimensionTrend;
+    building: AnalyticsDimensionTrend;
+    asset: AnalyticsDimensionTrend;
+    asset_failure: AnalyticsDimensionTrend;
   };
   insights: {
     department_with_most_issues?: AnalyticsBreakdown | null;
     category_with_most_issues?: AnalyticsBreakdown | null;
     category_increasing_fastest?: AnalyticsGrowth | null;
     most_problematic_building?: AnalyticsBreakdown | null;
+    building_with_highest_failure_rate?: (AnalyticsBreakdown & { failure_rate: number }) | null;
     are_we_completing_on_time?: { value: number; label: string };
+    current_sla_compliance?: { value: number; label: string };
   };
   filter_options: {
     departments: AnalyticsOption[];

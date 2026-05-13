@@ -7,18 +7,22 @@ use App\Mail\OtpVerificationMail;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
+use App\Services\ActivityLogger;
 
 class AuthController extends Controller
 {
     private const OTP_EXPIRY_MINUTES = 5;
     private const OTP_EXPIRY_SECONDS = 300;
+    private const UNIVERSITY_ID_REGEX = '/^((NaScR|SoScR)\/\d{4}\/\d{2}|SIA\/\d{4})$/';
 
     private function resolveAbilitiesAndSelection($roles): array
     {
@@ -52,8 +56,13 @@ class AuthController extends Controller
             'lname' => ['required', 'string', 'max:255'],
             'username' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255'],
-            'password' => ['required', 'string', 'min:6', 'confirmed'],
-            'university_id_number' => ['required', 'string', 'max:255'],
+            'password' => [
+                'required',
+                'string',
+                'confirmed',
+                PasswordRule::min(8)->letters()->mixedCase()->numbers()->symbols(),
+            ],
+            'university_id_number' => ['required', 'string', 'max:255', 'regex:' . self::UNIVERSITY_ID_REGEX],
             'dept_id' => ['required', 'integer', 'exists:departments,id'],
             'phone' => ['required', 'string', 'max:50'],
             'role_ids' => ['sometimes', 'array', 'min:1'],
@@ -61,81 +70,80 @@ class AuthController extends Controller
         ]);
 
         $normalizedEmail = Str::lower(trim($validated['email']));
-        $existingByEmail = User::whereRaw('LOWER(email) = ?', [$normalizedEmail])->first();
-        $existingByUsername = User::where('username', $validated['username'])->first();
+        $normalizedUniversityId = trim($validated['university_id_number']);
+        $normalizedUsername = trim($validated['username']);
 
-        if ($existingByEmail?->is_verified) {
-            throw ValidationException::withMessages([
-                'email' => ['The email has already been taken.'],
+        $duplicateErrors = [];
+
+        if (User::whereRaw('LOWER(email) = ?', [$normalizedEmail])->exists()) {
+            $duplicateErrors['email'] = ['The email has already been registered.'];
+        }
+
+        if (User::where('username', $normalizedUsername)->exists()) {
+            $duplicateErrors['username'] = ['The username has already been taken.'];
+        }
+
+        if (User::where('university_id_number', $normalizedUniversityId)->exists()) {
+            $duplicateErrors['university_id_number'] = ['The university ID has already been registered.'];
+        }
+
+        if ($duplicateErrors !== []) {
+            throw ValidationException::withMessages($duplicateErrors);
+        }
+
+        $plainOtp = null;
+
+        $user = DB::transaction(function () use ($validated, $normalizedEmail, $normalizedUniversityId, $normalizedUsername, &$plainOtp) {
+            $user = User::create([
+                'fname' => trim($validated['fname']),
+                'lname' => trim($validated['lname']),
+                'username' => $normalizedUsername,
+                'email' => $normalizedEmail,
+                'password' => Hash::make($validated['password']),
+                'university_id_number' => $normalizedUniversityId,
+                'dept_id' => $validated['dept_id'],
+                'phone' => trim($validated['phone']),
+                'is_verified' => false,
             ]);
-        }
 
-        if ($existingByUsername?->is_verified) {
-            throw ValidationException::withMessages([
-                'username' => ['The username has already been taken.'],
+            if (!empty($validated['role_ids'])) {
+                $user->roles()->sync($validated['role_ids']);
+            } elseif (Role::count() === 1) {
+                $user->roles()->sync([Role::query()->value('id')]);
+            }
+
+            $plainOtp = $this->issueOtpForUser($user);
+
+            return $user->fresh(['roles', 'department']);
+        });
+
+        try {
+            $this->sendOtpEmail($user, $plainOtp);
+        } catch (\Throwable $exception) {
+            Log::error('OTP email send failed during registration', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'error' => $exception->getMessage(),
             ]);
-        }
 
-        if ($existingByEmail && $existingByUsername && $existingByEmail->id !== $existingByUsername->id) {
-            throw ValidationException::withMessages([
-                'email' => ['This email cannot be used with that username.'],
-                'username' => ['This username cannot be used with that email.'],
-            ]);
-        }
-
-        $user = $existingByEmail ?? $existingByUsername ?? new User();
-
-        $user->fill([
-            'fname' => $validated['fname'],
-            'lname' => $validated['lname'],
-            'username' => $validated['username'],
-            'email' => $normalizedEmail,
-            'password' => Hash::make($validated['password']),
-            'university_id_number' => $validated['university_id_number'],
-            'dept_id' => $validated['dept_id'],
-            'phone' => $validated['phone'],
-            'is_verified' => false,
-        ]);
-        $user->save();
-
-        if (!empty($validated['role_ids'])) {
-            $user->roles()->sync($validated['role_ids']);
-        } elseif (Role::count() === 1) {
-            $user->roles()->sync([Role::first()->id]);
-        }
-
-        $otp = $this->issueOtpForUser($user);
-        Log::info('OTP generated', ['email' => $user->email, 'otp' => $otp]);
-
-        if ($this->isDevOtpMode()) {
             return response()->json([
-                'success' => true,
-                'message' => 'OTP generated (DEV MODE)',
-                'otp' => $otp,
-                'expires_in' => self::OTP_EXPIRY_SECONDS,
-            ], 201);
+                'success' => false,
+                'message' => 'Registration saved, but the OTP email could not be sent. Please verify your email configuration and try resending the OTP.',
+            ], 422);
         }
 
-        // Production email flow is intentionally ready but disabled for test mode.
-        // try {
-        //     Mail::to($user->email)->send(new OtpVerificationMail($otp, $user));
-        // } catch (\Throwable $exception) {
-        //     Log::error('OTP email send failed during registration', [
-        //         'user_id' => $user->id,
-        //         'email' => $user->email,
-        //         'error' => $exception->getMessage(),
-        //     ]);
-        //
-        //     return response()->json([
-        //         'success' => false,
-        //         'message' => 'Unable to send OTP email. Please verify mail credentials and try again.',
-        //     ], 422);
-        // }
-
-        return response()->json([
+        $response = [
             'success' => true,
-            'message' => 'Registration successful. Please verify OTP.',
-        ], 201);
+            'message' => 'Registration successful. Your account is pending OTP verification.',
+            'status' => 'pending_verification',
+            'expires_in' => self::OTP_EXPIRY_SECONDS,
+        ];
+
+        if ($this->isDevOtpMode() && $plainOtp) {
+            $response['otp'] = $plainOtp;
+        }
+
+        return response()->json($response, 201);
     }
 
     public function login(Request $request)
@@ -154,6 +162,16 @@ class AuthController extends Controller
     $user = User::where($loginType, $validated['login'])->first();
 
     if (!$user || !Hash::check($validated['password'], $user->password)) {
+        ActivityLogger::log(
+            $user?->id,
+            'auth',
+            'login',
+            'failed',
+            null,
+            'Failed login attempt.',
+            ['login' => $validated['login'], 'login_type' => $loginType],
+            $request
+        );
         throw ValidationException::withMessages([
             'login' => ['The provided credentials are incorrect.'],
         ]);
@@ -173,6 +191,16 @@ class AuthController extends Controller
 
     // Optional: prevent inactive users (only if the column exists)
     if (array_key_exists('is_active', $user->getAttributes()) && !$user->is_active) {
+        ActivityLogger::log(
+            $user->id,
+            'auth',
+            'login',
+            'failed',
+            null,
+            'Login blocked: inactive account.',
+            ['login' => $validated['login'], 'login_type' => $loginType],
+            $request
+        );
         return response()->json([
             'success' => false,
             'message' => 'Your account is inactive. Please contact support.'
@@ -186,6 +214,17 @@ class AuthController extends Controller
 
     $token = $user->createToken('auth_token', $abilities)->plainTextToken;
 
+    ActivityLogger::log(
+        $user->id,
+        'auth',
+        'login',
+        'success',
+        null,
+        'User logged in.',
+        ['abilities' => $abilities],
+        $request
+    );
+
     return response()->json([
         'success' => true,
         'message' => 'Login successful.',
@@ -194,6 +233,30 @@ class AuthController extends Controller
         'user' => $this->userPayload($user, $abilities),
     ]);
 }
+
+    public function logout(Request $request)
+    {
+        $user = $request->user();
+        if ($user && $user->currentAccessToken()) {
+            $user->currentAccessToken()->delete();
+        }
+
+        ActivityLogger::log(
+            $user?->id,
+            'auth',
+            'logout',
+            'success',
+            null,
+            'User logged out.',
+            null,
+            $request
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Logged out.',
+        ]);
+    }
 
     private function issueOtpForUser(User $user): string
     {
@@ -206,6 +269,11 @@ class AuthController extends Controller
         ])->save();
 
         return $otp;
+    }
+
+    private function sendOtpEmail(User $user, string $plainOtp): void
+    {
+        Mail::to($user->email)->send(new OtpVerificationMail($plainOtp, $user));
     }
 
     private function isDevOtpMode(): bool
@@ -229,11 +297,14 @@ class AuthController extends Controller
             'email' => ['required', 'string', 'email', 'exists:users,email'],
         ]);
 
-        $status = Password::sendResetLink(['email' => $validated['email']]);
+        $email = Str::lower(trim($validated['email']));
+        $status = Password::sendResetLink(['email' => $email]);
 
         return response()->json([
             'success' => $status === Password::RESET_LINK_SENT,
-            'message' => __($status),
+            'message' => $status === Password::RESET_LINK_SENT
+                ? 'Password reset link sent. Please check your email.'
+                : __($status),
         ], $status === Password::RESET_LINK_SENT ? 200 : 422);
     }
 
@@ -242,8 +313,17 @@ class AuthController extends Controller
         $validated = $request->validate([
             'token' => ['required', 'string'],
             'email' => ['required', 'string', 'email', 'exists:users,email'],
-            'password' => ['required', 'string', 'min:6', 'confirmed'],
+            'password' => [
+                'required',
+                'string',
+                'confirmed',
+                PasswordRule::min(8)->letters()->mixedCase()->numbers()->symbols(),
+            ],
         ]);
+
+        $validated['email'] = Str::lower(trim($validated['email']));
+        // Defensive normalization for links where `+` could be transformed into space.
+        $validated['token'] = str_replace(' ', '+', trim($validated['token']));
 
         $status = Password::reset(
             $validated,
@@ -257,7 +337,9 @@ class AuthController extends Controller
 
         return response()->json([
             'success' => $status === Password::PASSWORD_RESET,
-            'message' => __($status),
+            'message' => $status === Password::PASSWORD_RESET
+                ? 'Your password has been reset successfully.'
+                : __($status),
         ], $status === Password::PASSWORD_RESET ? 200 : 422);
     }
 

@@ -1,17 +1,17 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { 
-  Lock, 
-  Loader2, 
-  Eye, 
-  EyeOff, 
-  CheckCircle2, 
-  AlertCircle, 
+import {
+  Lock,
+  Loader2,
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  AlertCircle,
   ShieldCheck,
   Mail,
-  KeyRound
+  KeyRound,
 } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 
@@ -33,12 +33,10 @@ export default function ResetPasswordForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState("");
 
-  // Auto-hide error after 8 seconds
   useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => setError(null), 8000);
-      return () => clearTimeout(timer);
-    }
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 8000);
+    return () => clearTimeout(timer);
   }, [error]);
 
   useEffect(() => {
@@ -49,8 +47,17 @@ export default function ResetPasswordForm() {
     if (tokenParam) setToken(tokenParam);
   }, [searchParams]);
 
+  const hasResetLinkData = useMemo(() => Boolean(email && token), [email, token]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      setError("Password must be 8+ characters and include an uppercase letter, a number, and a special character.");
+      return;
+    }
+
     if (password !== confirmPassword) {
       setError("Passwords do not match. Please try again.");
       return;
@@ -74,7 +81,8 @@ export default function ResetPasswordForm() {
         },
         false
       );
-      setSuccess(data.message || "Your password has been successfully updated!");
+
+      setSuccess(data.message || "Your password has been reset successfully.");
       setTimeout(() => router.push("/login"), 2000);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to reset password.";
@@ -84,24 +92,25 @@ export default function ResetPasswordForm() {
     }
   };
 
-  const inputClass = "w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-400 text-slate-900 font-medium shadow-sm";
+  const inputClass =
+    "w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-400 text-slate-900 font-medium shadow-sm";
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50 text-slate-900">
       <div className="w-full max-w-md">
-        {/* Branding & Header */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-900 rounded-2xl shadow-lg mb-4 text-white">
             <ShieldCheck size={32} />
           </div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Set New Password</h1>
-          <p className="text-slate-500 mt-2 font-medium">Protect your university CMMS account</p>
+          <p className="text-slate-500 mt-2 font-medium">
+            Use the reset link from your email to securely update your password.
+          </p>
         </div>
 
         <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
           <div className="p-8">
             <form onSubmit={handleSubmit} className="space-y-5">
-              {/* Email Field */}
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-slate-700 ml-1" htmlFor="email">
                   Account Email
@@ -120,26 +129,32 @@ export default function ResetPasswordForm() {
                 </div>
               </div>
 
-              {/* Reset Token Field */}
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700 ml-1" htmlFor="token">
-                  Reset Token
-                </label>
-                <div className="relative group">
-                  <KeyRound className="absolute left-3 top-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-                  <input
-                    id="token"
-                    type="text"
-                    required
-                    placeholder="Paste the reset token"
-                    className={inputClass}
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                  />
+              {!hasResetLinkData && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-semibold text-slate-700 ml-1" htmlFor="token">
+                    Reset Token
+                  </label>
+                  <div className="relative group">
+                    <KeyRound className="absolute left-3 top-3.5 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+                    <input
+                      id="token"
+                      type="text"
+                      required
+                      placeholder="Paste the reset token from your email link"
+                      className={inputClass}
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                    />
+                  </div>
                 </div>
-              </div>
-              
-              {/* Password Field */}
+              )}
+
+              {hasResetLinkData && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700">
+                  Reset link detected. You can now choose a new password.
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-slate-700 ml-1" htmlFor="password">
                   New Password
@@ -150,7 +165,7 @@ export default function ResetPasswordForm() {
                     id="password"
                     type={showPassword ? "text" : "password"}
                     required
-                    placeholder="Min. 8 characters"
+                    placeholder="Create a strong password"
                     className={inputClass}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -163,9 +178,11 @@ export default function ResetPasswordForm() {
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                   </button>
                 </div>
+                <p className="text-[10px] text-slate-400 mt-1 italic ml-1">
+                  Must contain 8+ characters, 1 uppercase, 1 number, and 1 special character.
+                </p>
               </div>
 
-              {/* Confirm Password Field */}
               <div className="space-y-1.5">
                 <label className="text-sm font-semibold text-slate-700 ml-1" htmlFor="confirmPassword">
                   Confirm Password
@@ -191,8 +208,7 @@ export default function ResetPasswordForm() {
                 </div>
               </div>
 
-              {/* Status Messages */}
-              <div className="min-h-[50px] transition-all pt-2">
+              <div className="min-h-50px transition-all pt-2">
                 {error && (
                   <div className="p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-700 text-sm font-semibold flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
                     <AlertCircle size={18} className="shrink-0" />
@@ -226,7 +242,8 @@ export default function ResetPasswordForm() {
 
           <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-relaxed">
-              University Security Standards Enforced<br/>
+              University Security Standards Enforced
+              <br />
               Standard ISO/IEC 27001
             </p>
           </div>

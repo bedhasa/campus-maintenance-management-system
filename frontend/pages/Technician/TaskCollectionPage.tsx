@@ -1,277 +1,177 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { AlertTriangle, Clock3, Eye, MapPin, PlayCircle, Calendar, ChevronRight } from "lucide-react";
+import { MapPin, Calendar, Clock, ChevronRight, PlayCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { ListSkeleton } from "@/components/PageSkeleton";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
 import {
   TechnicianWorkOrder,
   formatDate,
-  getPriorityLabel,
-  getPriorityTone,
-  getStatusLabel,
-  getStatusTone,
   getTaskLocation,
   getTaskTitle,
-  isDelayedTask,
 } from "./technician-utils";
-
-type WorkOrderListResponse = {
-  success: boolean;
-  work_orders: {
-    data: TechnicianWorkOrder[];
-  };
-};
-
-type TaskCollectionPageProps = {
-  title: string;
-  subtitle: string;
-  query?: string;
-  emptyTitle: string;
-  emptyCopy: string;
-  showFilters?: boolean;
-};
 
 export default function TaskCollectionPage({
   title,
   subtitle,
   query,
-  emptyTitle,
+  emptyTitle = "No Tasks Found",
   emptyCopy,
-  showFilters = !query,
-}: TaskCollectionPageProps) {
-  const router = useRouter();
+}: {
+  title: string;
+  subtitle: string;
+  query?: string;
+  emptyTitle?: string;
+  emptyCopy?: string;
+}) {
   const [items, setItems] = useState<TechnicianWorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<{ type: "error" | "success"; message: string } | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
-  const [nowMs, setNowMs] = useState<number | null>(null);
-  const [activeFilter, setActiveFilter] = useState<"overall" | "not_started" | "in_progress" | "completed" | "delayed">("overall");
+  const [priorityFilter, setPriorityFilter] = useState<"all" | "urgent" | "high" | "medium" | "low">("all");
 
-  useEffect(() => {
-    setNowMs(Date.now());
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(null), 5000);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      const data = await apiRequest<WorkOrderListResponse>(
-        `/api/technician/work-orders${query ? `?${query}` : ""}`,
+      const queryParams = new URLSearchParams(query ?? "");
+      if (priorityFilter !== "all") {
+        queryParams.set("priority", priorityFilter);
+      } else {
+        queryParams.delete("priority");
+      }
+      const suffix = queryParams.toString();
+      const data = await apiRequest<{ work_orders: { data: TechnicianWorkOrder[] } }>(
+        `/api/technician/work-orders${suffix ? `?${suffix}` : ""}`,
         { method: "GET" },
         true
       );
       setItems(data.work_orders?.data ?? []);
-    } catch (err) {
-      setToast({ type: "error", message: err instanceof Error ? err.message : "Failed to load tasks." });
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [query]);
+  }, [priorityFilter, query]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const startTask = async (e: React.MouseEvent, workOrderId: number) => {
-    e.stopPropagation(); // Prevents the card click event from firing
-    try {
-      setBusyId(workOrderId);
-      await apiRequest(`/api/technician/work-orders/${workOrderId}/start`, { method: "PATCH" }, true);
-      setItems((prev) =>
-        prev.map((item) => (item.id === workOrderId ? { ...item, work_status: "in_progress" } : item))
-      );
-      router.push(`/technician/work-orders/${workOrderId}`);
-    } catch (err) {
-      setToast({ type: "error", message: err instanceof Error ? err.message : "Failed to start task." });
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleCardClick = (workOrderId: number) => {
-    router.push(`/technician/work-orders/${workOrderId}`);
-  };
-
-  const priorityWeight = (priority?: string | null) => {
-    switch (priority) {
-      case "urgent":
-        return 0;
-      case "high":
-        return 1;
-      case "medium":
-        return 2;
-      case "low":
-        return 3;
-      default:
-        return 4;
-    }
-  };
-
-  const sortedItems = [...items].sort((a, b) => {
-    const priorityDiff = priorityWeight(a.request?.priority) - priorityWeight(b.request?.priority);
-    if (priorityDiff !== 0) return priorityDiff;
-
-    const aTime = new Date(a.created_at || a.request?.created_at || 0).getTime();
-    const bTime = new Date(b.created_at || b.request?.created_at || 0).getTime();
-    return aTime - bTime;
-  });
-
-  const filteredItems = sortedItems.filter((task) => {
-    if (!showFilters || activeFilter === "overall") return true;
-    if (activeFilter === "delayed") return isDelayedTask(task, nowMs);
-    if (activeFilter === "not_started") return task.work_status === "assigned";
-    if (activeFilter === "in_progress") return task.work_status === "in_progress" || task.work_status === "paused";
-    if (activeFilter === "completed") return task.work_status === "completed";
-    return true;
-  });
+  useEffect(() => { void load(); }, [load]);
+  useLiveRefresh(() => load(true), { enabled: true, intervalMs: 8000 });
 
   return (
-    <div className="space-y-6 pb-12 px-2">
-      <header className="px-1 pt-4">
-        <h1 className="text-2xl font-black text-slate-900 leading-tight">{title}</h1>
-        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 mt-1">{subtitle}</p>
+    <div className="max-w-2xl mx-auto space-y-6 pb-20 px-4">
+      {/* Simple Header */}
+      <header className="py-6">
+        <h1 className="text-3xl font-black text-slate-900 tracking-tight">{title}</h1>
+        <p className="text-sm font-bold text-blue-600 uppercase tracking-widest">{subtitle}</p>
       </header>
 
-      {showFilters && (
-        <div className="px-1">
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            {[
-              { key: "overall", label: "Overall" },
-              { key: "not_started", label: "Not Started" },
-              { key: "in_progress", label: "In Progress" },
-              { key: "completed", label: "Completed" },
-              { key: "delayed", label: "Delayed" },
-            ].map((item) => {
-              const active = activeFilter === item.key;
-              return (
-                <button
-                  key={item.key}
-                  onClick={() => setActiveFilter(item.key as typeof activeFilter)}
-                  className={`shrink-0 rounded-full px-4 py-2 text-[10px] font-black uppercase tracking-[0.15em] border transition-all ${
-                    active
-                      ? "bg-[#003366] text-white border-[#003366] shadow-lg shadow-blue-900/20"
-                      : "bg-white text-slate-500 border-slate-200"
-                  }`}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {toast && (
-        <div className="fixed right-4 top-4 z-50 animate-in fade-in zoom-in-95">
-          <div
-            className={`rounded-xl border px-4 py-3 text-sm font-bold shadow-xl ${
-              toast.type === "error"
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
+        {(["all", "urgent", "high", "medium", "low"] as const).map((priority) => (
+          <button
+            key={priority}
+            type="button"
+            onClick={() => setPriorityFilter(priority)}
+            className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest transition ${
+              priorityFilter === priority
+                ? "bg-[#003366] text-white"
+                : "bg-slate-50 text-slate-500 hover:bg-slate-100"
             }`}
           >
-            {toast.message}
-          </div>
-        </div>
-      )}
+            {priority === "all" ? "All priorities" : priority}
+          </button>
+        ))}
+      </div>
 
       {loading ? (
         <ListSkeleton rows={3} />
-      ) : filteredItems.length === 0 ? (
-        <div className="rounded-[2.5rem] border-2 border-dashed border-slate-200 bg-white py-20 text-center px-10">
-          <p className="text-sm font-black text-slate-400 uppercase tracking-widest">{emptyTitle}</p>
-          <p className="mt-2 text-xs font-medium text-slate-400 leading-relaxed">{emptyCopy}</p>
-        </div>
       ) : (
         <div className="space-y-4">
-          {filteredItems.map((task) => {
-            const delayed = isDelayedTask(task, nowMs);
+          {items.map((task) => {
+            const isPriority = task.request?.priority === "urgent" || task.request?.priority === "high";
+            
             return (
-              <article 
-                key={task.id} 
-                onClick={() => handleCardClick(task.id)}
-                className="group relative rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm active:scale-[0.97] active:bg-slate-50 transition-all cursor-pointer"
+              <div 
+                key={task.id}
+                className={`relative overflow-hidden rounded-2rem border-2 transition-all bg-white p-6 ${
+                  isPriority ? "border-amber-200 shadow-md" : "border-slate-100 shadow-sm"
+                }`}
               >
-                {/* Status Badges */}
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex gap-1.5">
-                    <span className={`rounded-lg px-2.5 py-1 text-[9px] font-black uppercase tracking-wider border ${getPriorityTone(task.request?.priority)}`}>
-                      {getPriorityLabel(task.request?.priority)}
-                    </span>
-                    <span className={`rounded-lg px-2.5 py-1 text-[9px] font-black uppercase tracking-wider border ${getStatusTone(task.work_status)}`}>
-                      {getStatusLabel(task.work_status)}
-                    </span>
-                  </div>
-                  <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
-                </div>
-
-                {/* Content */}
-                <div className="space-y-1.5 mb-5">
-                  <h2 className="text-lg font-black text-slate-900 leading-tight group-hover:text-blue-900">
-                    {getTaskTitle(task)}
-                  </h2>
-                  <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed font-medium">
-                    {task.request?.description || "No further details provided."}
-                  </p>
-                </div>
-
-                {/* Meta Info */}
-                <div className="grid grid-cols-2 gap-2.5 mb-5">
-                  <div className="flex items-center gap-2 bg-blue-50/50 p-2.5 rounded-xl border border-blue-100/50">
-                    <MapPin size={14} className="text-blue-600 shrink-0" />
-                    <span className="text-[11px] font-bold text-blue-900 truncate">{getTaskLocation(task)}</span>
-                  </div>
-                  <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                    <Calendar size={14} className="text-slate-400 shrink-0" />
-                    <span className="text-[11px] font-bold text-slate-600">{formatDate(task.request?.created_at || task.created_at)}</span>
-                  </div>
-                </div>
-
-                {/* Delay Warning */}
-                {delayed && (
-                  <div className="mb-5 flex items-center gap-3 rounded-2xl bg-amber-50 p-3.5 text-amber-800 border border-amber-200/50">
-                    <AlertTriangle size={16} className="shrink-0 text-amber-600" />
-                    <p className="text-[11px] font-bold leading-snug">
-                      {task.delay_reason || "Delayed: Priority attention needed."}
-                    </p>
+                {/* Priority Glow Effect */}
+                {isPriority && (
+                  <div className="absolute top-0 right-0 px-4 py-1 bg-amber-100 text-amber-700 text-[10px] font-black uppercase rounded-bl-2xl border-l border-b border-amber-200 animate-pulse">
+                    High Priority
                   </div>
                 )}
 
-                {/* Primary Action Button */}
-                <div className="pt-2">
-                  {task.work_status === "assigned" || task.work_status === "paused" ? (
-                    <button
-                      onClick={(e) => void startTask(e, task.id)}
-                      disabled={busyId === task.id}
-                      className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-[#003366] py-4 text-[10px] font-black uppercase tracking-[0.15em] text-white shadow-lg shadow-blue-900/20 active:bg-blue-900 disabled:opacity-50"
-                    >
-                      <PlayCircle size={14} />
-                      {busyId === task.id ? "INITIALIZING..." : task.work_status === "paused" ? "RESUME WORK ORDER" : "START WORK ORDER"}
-                    </button>
-                  ) : (
-                    <div className="w-full inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-100 py-4 text-[10px] font-black uppercase tracking-[0.15em] text-slate-600">
-                      {task.work_status === "in_progress" ? (
-                        <span className="text-emerald-700 flex items-center gap-2">
-                          <Clock3 size={14} /> ACTIVE IN PROGRESS
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-2 italic">
-                          <Eye size={14} /> VIEW COMPLETED TASK
-                        </span>
-                      )}
+                <div className="flex flex-col gap-4">
+                  {/* Title & Description */}
+                  <div>
+                    <h2 className="text-xl font-black text-slate-900 leading-tight">
+                      {getTaskTitle(task)}
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-500 font-medium leading-relaxed">
+                      {task.request?.description || "No description provided."}
+                    </p>
+                  </div>
+
+                  {/* Task Metadata Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Location */}
+                    <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                      <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
+                        <MapPin size={16} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase">Location</p>
+                        <p className="text-xs font-bold text-slate-900">{getTaskLocation(task)}</p>
+                      </div>
+                    </div>
+
+                    {/* Timeline */}
+                    <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                      <div className="p-2 bg-white rounded-xl shadow-sm text-emerald-600">
+                        <Calendar size={16} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-slate-400 uppercase">Assigned On</p>
+                        <p className="text-xs font-bold text-slate-900">{formatDate(task.created_at)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expected Completion Date */}
+                  {task.expected_completion_date && (
+                    <div className="flex items-center gap-3 bg-rose-50/50 p-3 rounded-2xl border border-rose-100">
+                      <Clock size={16} className="text-rose-600" />
+                      <p className="text-xs font-bold text-rose-900">
+                        Deadline: <span className="font-black">{formatDate(task.expected_completion_date)}</span>
+                      </p>
                     </div>
                   )}
+
+                  {/* Action Button */}
+                  <Link
+                    href={`/technician/work-orders/${task.id}`}
+                    className="w-full mt-2 group flex items-center justify-between bg-slate-900 hover:bg-blue-700 text-white p-4 rounded-2xl transition-all shadow-lg shadow-slate-200"
+                  >
+                    <span className="flex items-center gap-2 text-xs font-black uppercase tracking-widest">
+                      <PlayCircle size={18} />
+                      Open Task Details
+                    </span>
+                    <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                  </Link>
                 </div>
-              </article>
+              </div>
             );
           })}
+
+          {items.length === 0 && (
+            <div className="text-center py-20 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+              <p className="text-sm font-black text-slate-400 uppercase tracking-widest">{emptyTitle}</p>
+              {emptyCopy && (
+                <p className="mt-3 mx-auto max-w-md text-sm font-medium leading-relaxed text-slate-500">
+                  {emptyCopy}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -106,44 +106,36 @@ class OtpVerificationController extends Controller
             ], 409);
         }
 
-        $otp = (string) random_int(100000, 999999);
-        $user->forceFill([
-            'otp' => Hash::make($otp),
-            'otp_expires_at' => now()->addMinutes(self::OTP_EXPIRY_MINUTES),
-        ])->save();
-        Log::info('OTP generated', ['email' => $user->email, 'otp' => $otp]);
+        $otp = $this->issueOtpForUser($user);
 
-        if ($this->isDevOtpMode()) {
-            return response()->json([
-                'success' => true,
-                'message' => 'OTP generated (DEV MODE)',
-                'otp' => $otp,
-                'expires_in' => self::OTP_EXPIRY_SECONDS,
+        try {
+            Mail::to($user->email)->send(new OtpVerificationMail($otp, $user));
+        } catch (\Throwable $exception) {
+            Log::error('OTP email send failed during resend', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'error' => $exception->getMessage(),
             ]);
-        }
 
-        // Production email flow is intentionally ready but disabled for test mode.
-        // try {
-        //     Mail::to($user->email)->send(new OtpVerificationMail($otp, $user));
-        // } catch (\Throwable $exception) {
-        //     Log::error('OTP email send failed during resend', [
-        //         'user_id' => $user->id,
-        //         'email' => $user->email,
-        //         'error' => $exception->getMessage(),
-        //     ]);
-        //
-        //     return response()->json([
-        //         'success' => false,
-        //         'message' => 'Unable to send OTP email. Please verify mail credentials and try again.',
-        //     ], 422);
-        // }
+            return response()->json([
+                'success' => false,
+                'message' => 'Unable to send OTP email. Please verify mail credentials and try again.',
+            ], 422);
+        }
 
         RateLimiter::hit($cooldownKey, 60);
 
-        return response()->json([
+        $response = [
             'success' => true,
-            'message' => 'OTP regenerated successfully.',
-        ]);
+            'message' => 'OTP sent successfully.',
+            'expires_in' => self::OTP_EXPIRY_SECONDS,
+        ];
+
+        if ($this->isDevOtpMode()) {
+            $response['otp'] = $otp;
+        }
+
+        return response()->json($response);
     }
 
     private function invalidResponse(): JsonResponse
@@ -157,6 +149,21 @@ class OtpVerificationController extends Controller
     private function attemptKey(string $prefix, string $email, ?string $ip): string
     {
         return sprintf('otp:%s:%s:%s', $prefix, $email, $ip ?? 'unknown');
+    }
+
+    private function issueOtpForUser(User $user): string
+    {
+        $otp = (string) random_int(100000, 999999);
+
+        $user->forceFill([
+            'otp' => Hash::make($otp),
+            'otp_expires_at' => now()->addMinutes(self::OTP_EXPIRY_MINUTES),
+            'is_verified' => false,
+        ])->save();
+
+        Log::info('OTP generated', ['email' => $user->email, 'otp' => $otp]);
+
+        return $otp;
     }
 
     private function isDevOtpMode(): bool

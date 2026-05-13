@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\PreventiveMaintenanceController;
 use App\Http\Controllers\Api\Requester\MaintenanceRequestController as RequesterMaintenanceRequestController;
 use App\Http\Controllers\Api\Requester\MetadataController as RequesterMetadataController;
 use App\Http\Controllers\Api\Requester\NotificationController as RequesterNotificationController;
+use App\Http\Controllers\Api\PMModuleController;
 use App\Http\Controllers\Api\Requester\ProfileController as RequesterProfileController;
 use App\Http\Controllers\Api\Requester\SettingsController as RequesterSettingsController;
 use App\Http\Controllers\Api\RequesterFeedbackController;
@@ -40,6 +41,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/requests', [RequesterMaintenanceRequestController::class, 'store']);
         Route::get('/requests/{id}', [RequesterMaintenanceRequestController::class, 'show']);
         Route::put('/requests/{id}', [RequesterMaintenanceRequestController::class, 'update']);
+        Route::patch('/requests/{id}/cancel', [RequesterMaintenanceRequestController::class, 'cancel']);
 
         Route::get('/requests/{id}/status-logs', [RequesterMaintenanceRequestController::class, 'statusLogs']);
 
@@ -51,6 +53,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/requests/{id}/images', [RequesterMaintenanceRequestController::class, 'images']);
         Route::post('/requests/{id}/images', [RequesterMaintenanceRequestController::class, 'addImage']);
         Route::patch('/requests/{id}/verify-completion', [RequesterMaintenanceRequestController::class, 'verifyCompletion']);
+        Route::patch('/requests/{id}/reopen', [RequesterMaintenanceRequestController::class, 'reopen']);
         Route::post('/requests/{id}/rating', [RequesterFeedbackController::class, 'rate']);
 
         Route::get('/notifications', [RequesterNotificationController::class, 'index']);
@@ -92,19 +95,36 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::patch('/requests/{id}/messages/{messageId}', [SupervisorController::class, 'updateRequestMessage']);
         Route::delete('/requests/{id}/messages/{messageId}', [SupervisorController::class, 'deleteRequestMessage']);
         Route::patch('/requests/{id}/review', [SupervisorController::class, 'review']);
+        Route::patch('/requests/{id}/review/undo', [SupervisorController::class, 'undoReview']);
         Route::patch('/requests/{id}/assign', [SupervisorController::class, 'assign']);
         Route::patch('/requests/{id}/close', [SupervisorController::class, 'close']);
         Route::patch('/requests/{id}/reopen', [SupervisorController::class, 'reopen']);
         Route::get('/work-orders', [SupervisorController::class, 'workOrders']);
         Route::get('/work-orders/{id}', [SupervisorController::class, 'showWorkOrder']);
+        Route::patch('/work-orders/{id}/close', [SupervisorController::class, 'closeManualWorkOrder']);
+        Route::patch('/work-orders/{id}/reassign', [SupervisorController::class, 'reassignWorkOrder']);
         Route::get('/technicians/by-category', [SupervisorController::class, 'techniciansForCategory']);
         Route::get('/technicians/{id}', [SupervisorController::class, 'technicianProfile']);
         Route::post('/work-orders/manual', [SupervisorController::class, 'createManualWorkOrder']);
         Route::get('/assets', [AssetManagementController::class, 'index']);
         Route::post('/assets', [AssetManagementController::class, 'store']);
         Route::put('/assets/{id}', [AssetManagementController::class, 'update']);
+        Route::get('/facilities/buildings', [AssetManagementController::class, 'listBuildings']);
+        Route::post('/facilities/buildings', [AssetManagementController::class, 'storeBuilding']);
+        Route::put('/facilities/buildings/{id}', [AssetManagementController::class, 'updateBuilding']);
+        Route::get('/facilities/departments', [AssetManagementController::class, 'listDepartments']);
+        Route::post('/facilities/departments', [AssetManagementController::class, 'storeDepartment']);
+        Route::put('/facilities/departments/{id}', [AssetManagementController::class, 'updateDepartment']);
+        Route::get('/facilities/rooms', [AssetManagementController::class, 'listRooms']);
+        Route::post('/facilities/rooms', [AssetManagementController::class, 'storeRoom']);
+        Route::put('/facilities/rooms/{id}', [AssetManagementController::class, 'updateRoom']);
         Route::get('/analytics', [SupervisorController::class, 'analytics']);
         Route::get('/reports', [SupervisorController::class, 'reports']);
+
+        Route::prefix('/custom-pm')->group(function () {
+            Route::get('/', [PMModuleController::class, 'indexSupervisor']);
+            Route::post('/', [PMModuleController::class, 'store']);
+        });
     });
 
     // Supervisor analytics aliases for unified frontend endpoint contracts.
@@ -121,7 +141,16 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::patch('/work-orders/{id}/pause', [TechnicianController::class, 'pause']);
         Route::post('/work-orders/{id}/progress-note', [TechnicianController::class, 'addProgressNote']);
         Route::patch('/work-orders/{id}/delay', [TechnicianController::class, 'reportDelay']);
+        Route::post('/work-orders/{id}/complete', [TechnicianController::class, 'complete']);
         Route::patch('/work-orders/{id}/complete', [TechnicianController::class, 'complete']);
+
+        Route::prefix('/custom-pm')->group(function () {
+            Route::get('/', [PMModuleController::class, 'indexTechnician']);
+            Route::get('/{id}', [PMModuleController::class, 'showTechnician']);
+            Route::patch('/{id}/accept', [PMModuleController::class, 'acceptTask']);
+            Route::patch('/{id}/checklist/{checklistId}', [PMModuleController::class, 'updateChecklist']);
+            Route::post('/{id}/complete', [PMModuleController::class, 'completeTask']);
+        });
     });
 
     Route::prefix('/inventory')->group(function () {

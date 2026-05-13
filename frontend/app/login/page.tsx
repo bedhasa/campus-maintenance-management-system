@@ -91,19 +91,19 @@ export default function LoginForm() {
   };
 
   // 1. Full-screen Transition (Success State)
-  if (isTransitioning) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <div className="text-center animate-in fade-in zoom-in duration-500">
-          <div className="inline-flex items-center justify-center w-24 h-24 bg-emerald-500 rounded-full shadow-xl mb-6 text-white">
-            <CheckCircle2 size={48} strokeWidth={3} />
-          </div>
-          <h2 className="text-3xl font-bold text-slate-800 tracking-tight">Access Granted</h2>
-          <p className="text-slate-500 mt-2 font-medium">Preparing your personalized dashboard...</p>
-        </div>
-      </div>
-    );
-  }
+  // if (isTransitioning) {
+  //   return (
+  //     <div className="min-h-screen flex items-center justify-center bg-slate-50">
+  //       <div className="text-center animate-in fade-in zoom-in duration-500">
+  //         <div className="inline-flex items-center justify-center w-24 h-24 bg-emerald-500 rounded-full shadow-xl mb-6 text-white">
+  //           <CheckCircle2 size={48} strokeWidth={3} />
+  //         </div>
+  //         <h2 className="text-3xl font-bold text-slate-800 tracking-tight">Access Granted</h2>
+  //         <p className="text-slate-500 mt-2 font-medium">Preparing your personalized dashboard...</p>
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   const inputClass = "block w-full pl-10 pr-10 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all placeholder-slate-400 text-slate-900 font-medium shadow-sm";
 

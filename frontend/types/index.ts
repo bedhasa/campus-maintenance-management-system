@@ -10,7 +10,8 @@ export enum TicketStatus {
   ON_HOLD = 'ON_HOLD',
   COMPLETED = 'COMPLETED',
   CLOSED = 'CLOSED',
-  REJECTED = 'REJECTED'
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED'
 }
 
 export enum Priority {

@@ -67,6 +67,8 @@ export default function UsersPage() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
 
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
@@ -77,12 +79,15 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const loadUsers = async () => {
+  const loadUsers = async (opts?: { search?: string; role?: string }) => {
     setLoading(true);
     setError(null);
     try {
       const query = new URLSearchParams();
-      if (search.trim()) query.set("search", search.trim());
+      const nextSearch = (opts?.search ?? search).trim();
+      const nextRole = opts?.role ?? roleFilter;
+      if (nextSearch) query.set("search", nextSearch);
+      if (nextRole && nextRole !== "all") query.set("role", nextRole);
       const data = await apiRequest<UsersResponse>(`/api/admin/users?${query.toString()}`, { method: "GET" }, true);
       setUsers(data.users.data ?? []);
       setRoles(data.roles ?? []);
@@ -107,6 +112,13 @@ export default function UsersPage() {
     void Promise.all([loadUsers(), loadDepartments()]);
   }, []);
 
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      void loadUsers({ search, role: roleFilter });
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [roleFilter, search]);
+
   const filteredUsers = useMemo(() => {
     return users.filter((u) => {
       if (statusFilter === "active" && !u.is_active) return false;
@@ -114,6 +126,20 @@ export default function UsersPage() {
       return true;
     });
   }, [users, statusFilter]);
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const pagedUsers = useMemo(
+    () => filteredUsers.slice((page - 1) * pageSize, page * pageSize),
+    [filteredUsers, page]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, roleFilter, statusFilter, users.length]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const openCreate = () => {
     setEditingUserId(null);
@@ -281,6 +307,18 @@ export default function UsersPage() {
           </div>
           <select
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+            value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)}
+          >
+            <option value="all">All Roles</option>
+            {roles.map((r) => (
+              <option key={r.id} value={r.name.toLowerCase()}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as "all" | "active" | "inactive")}
           >
@@ -288,13 +326,9 @@ export default function UsersPage() {
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
-          <button
-            type="button"
-            onClick={() => void loadUsers()}
-            className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700"
-          >
-            {loading ? "Loading..." : "Apply Search"}
-          </button>
+          <div className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+            {loading ? "Searching..." : "Auto search enabled"}
+          </div>
         </div>
       </div>
 
@@ -316,7 +350,7 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredUsers.map((u) => (
+            {pagedUsers.map((u) => (
               <tr key={u.id}>
                 <td className="px-4 py-3">
                   <p className="text-sm font-black text-slate-900">
@@ -373,9 +407,32 @@ export default function UsersPage() {
             ))}
           </tbody>
         </table>
-        {filteredUsers.length === 0 && !loading && (
+        {pagedUsers.length === 0 && !loading && (
           <div className="p-10 text-center text-sm font-semibold text-slate-400">No users found.</div>
         )}
+      </div>
+      <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+        <p className="text-xs font-semibold text-slate-500">
+          {filteredUsers.length} users - page {page} / {totalPages}
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+            disabled={page <= 1}
+            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-black uppercase tracking-wider text-slate-700 disabled:opacity-40"
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={page >= totalPages}
+            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-black uppercase tracking-wider text-slate-700 disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
       </div>
 
       {showForm && (

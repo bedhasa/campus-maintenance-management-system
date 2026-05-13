@@ -8,6 +8,7 @@ import {
   ClipboardList, 
   Package, 
   Calendar,
+  Building2,
   LogOut,
   Settings,
   History,
@@ -72,7 +73,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
           { name: t('workOrders'), path: '/supervisor/work-orders', icon: <ListTodo size={18} />, tooltip: "Track work execution" },
           { name: 'Technicians', path: '/supervisor/technicians', icon: <Users size={18} />, tooltip: "Manage maintenance staff" },
           { name: 'Maintenance Center', path: '/supervisor/maintenance-center', icon: <Calendar size={18} />, tooltip: "Manual WO and PM in one page" },
-          { name: t('analytics'), path: '/supervisor/analytics', icon: <Activity size={18} />, tooltip: "Charts & KPIs" },
+          { name: 'Facility Management', path: '/supervisor/facility-management', icon: <Building2 size={18} />, tooltip: "Register assets, buildings, departments" },
           { name: 'Reports', path: '/supervisor/reports', icon: <History size={18} />, tooltip: "Export and print reports" },
         );
         if (hasSupervisorAdminAccess) {
@@ -87,7 +88,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
           { name: 'Dashboard', path: '/technician/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Task summary" },
           { name: 'My Tasks', path: '/technician/tasks', icon: <ClipboardList size={18} />, tooltip: "Assigned jobs" },
           { name: 'In Progress', path: '/technician/in-progress', icon: <Activity size={18} />, tooltip: "Active work" },
-          { name: 'Completed', path: '/technician/completed', icon: <History size={18} />, tooltip: "Finished work" },
+          { name: 'History', path: '/technician/history', icon: <History size={18} />, tooltip: "Submitted and closed work" },
           { name: 'Delayed Tasks', path: '/technician/delayed', icon: <Calendar size={18} />, tooltip: "Overdue and delayed jobs" },
         );
         break;
@@ -105,7 +106,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
           { name: t('dashboard'), path: '/admin/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "System overview" },
           { name: 'Users', path: '/admin/users', icon: <Users size={18} />, tooltip: "User management" },
           { name: 'System Logs', path: '/admin/system-logs', icon: <History size={18} />, tooltip: "Audit trail" },
-          { name: t('analytics'), path: '/admin/analytics', icon: <Activity size={18} />, tooltip: "Performance analytics" },
+          { name: 'Facility Management', path: '/admin/facility-management', icon: <Building2 size={18} />, tooltip: "Register assets, buildings, departments" },
           { name: 'Reports', path: '/admin/reports', icon: <ClipboardList size={18} />, tooltip: "Export reports" },
         );
         break;

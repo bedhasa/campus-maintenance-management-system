@@ -9,19 +9,16 @@ import { apiRequest } from "@/lib/api";
 type VerifyOtpResponse = {
   success: boolean;
   message: string;
-  otp?: string;
   expires_in?: number;
 };
 
 export default function VerifyOtpPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const emailFromQuery = searchParams.get("email") ?? "";
-  const devOtpFromQuery = searchParams.get("dev_otp") ?? "";
+  const emailFromQuery = searchParams?.get("email") ?? "";
 
   const [email, setEmail] = useState(emailFromQuery);
   const [otp, setOtp] = useState("");
-  const [devOtp, setDevOtp] = useState(devOtpFromQuery);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
@@ -31,10 +28,6 @@ export default function VerifyOtpPage() {
   useEffect(() => {
     setEmail(emailFromQuery);
   }, [emailFromQuery]);
-
-  useEffect(() => {
-    if (devOtpFromQuery) setDevOtp(devOtpFromQuery);
-  }, [devOtpFromQuery]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -108,10 +101,8 @@ export default function VerifyOtpPage() {
         false
       );
 
-      setSuccessMessage(data.message || "OTP resent successfully.");
-      if (data.otp) {
-        setDevOtp(data.otp);
-      }
+      const expiresInMinutes = data.expires_in ? Math.round(data.expires_in / 60) : 5;
+      setSuccessMessage(`${data.message || "OTP resent successfully."} The code will expire in ${expiresInMinutes} minutes.`);
       setCooldown(60);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to resend OTP.");
@@ -129,13 +120,8 @@ export default function VerifyOtpPage() {
           </div>
           <h1 className="text-3xl font-black tracking-tight text-slate-900">Verify OTP</h1>
           <p className="mt-2 text-sm font-medium text-slate-500">
-            Enter the 6-digit code sent to your email.
+            Enter the 6-digit code sent to your email. It expires after 5 minutes.
           </p>
-          {devOtp && (
-            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold tracking-wide text-amber-700">
-              DEV OTP: {devOtp}
-            </p>
-          )}
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white shadow-xl overflow-hidden">

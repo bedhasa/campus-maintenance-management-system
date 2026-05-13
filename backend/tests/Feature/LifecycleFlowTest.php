@@ -142,8 +142,14 @@ class LifecycleFlowTest extends TestCase
         ]);
 
         $completeResponse = $this->patchJson("/api/technician/work-orders/{$workOrderId}/complete", [
+            'resolution_summary' => 'Checked filters and replaced the damaged fan belt.',
             'completion_note' => 'Checked filters and replaced the damaged fan belt.',
             'problem_found' => 'Fan belt was worn out.',
+            'probable_cause' => 'Wear and Tear',
+            'diagnostic_steps' => [
+                'Verified blower operation and inspected belt condition.',
+                'Confirmed tension loss and fraying on the drive belt.',
+            ],
             'action_taken' => 'Replaced the belt and tested cooling cycle.',
         ]);
 
@@ -162,17 +168,24 @@ class LifecycleFlowTest extends TestCase
             'related_id' => $requestId,
         ]);
 
-        Sanctum::actingAs($supervisor, ['role:supervisor']);
-        $closeResponse = $this->patchJson("/api/supervisor/requests/{$requestId}/close");
+        Sanctum::actingAs($requester, ['role:requester']);
+        $approvalResponse = $this->patchJson("/api/requester/requests/{$requestId}/verify-completion", [
+            'action' => 'accept',
+        ]);
 
-        $closeResponse->assertOk();
+        $approvalResponse->assertOk();
         $this->assertDatabaseHas('maintenance_requests', [
             'id' => $requestId,
-            'status' => 'closed',
+            'status' => 'completed',
         ]);
         $this->assertDatabaseHas('notifications', [
-            'user_id' => $requester->id,
-            'type' => 'request_closed',
+            'user_id' => $technician->id,
+            'type' => 'request_completion_approved',
+            'related_id' => $requestId,
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $supervisor->id,
+            'type' => 'request_completion_approved',
             'related_id' => $requestId,
         ]);
 
@@ -198,6 +211,21 @@ class LifecycleFlowTest extends TestCase
         $technician->refresh();
         $this->assertSame(5.0, (float) $technician->avg_rating);
         $this->assertSame(1, (int) $technician->total_ratings);
+
+        Sanctum::actingAs($supervisor, ['role:supervisor']);
+        $closeResponse = $this->patchJson("/api/supervisor/requests/{$requestId}/close");
+
+        $closeResponse->assertOk();
+        $this->assertDatabaseHas('maintenance_requests', [
+            'id' => $requestId,
+            'status' => 'closed',
+        ]);
+        $this->assertDatabaseHas('technician_ratings', [
+            'request_id' => $requestId,
+            'technician_id' => $technician->id,
+            'requester_id' => $requester->id,
+            'rating' => 5,
+        ]);
 
         Sanctum::actingAs($inventoryOfficer, ['role:inventory_officer']);
         $recordResponse = $this->postJson('/api/inventory/part-requests', [
@@ -258,6 +286,60 @@ class LifecycleFlowTest extends TestCase
             'related_id' => $partRequestId,
         ]);
         $this->assertSame(7, (int) SparePart::query()->findOrFail($part->id)->quantity_available);
+    }
+
+    public function test_supervisor_can_close_completed_manual_work_order(): void
+    {
+        $fixtures = $this->createCoreFixtures();
+        $supervisor = $fixtures['supervisor'];
+        $technician = $fixtures['technician'];
+
+        Sanctum::actingAs($supervisor, ['role:supervisor']);
+        $createResponse = $this->postJson('/api/supervisor/work-orders/manual', [
+            'assigned_to' => $technician->id,
+            'priority' => 'medium',
+            'scheduled_date' => now()->toDateString(),
+            'scheduled_time' => '10:00',
+            'estimated_hours' => 2,
+            'release' => true,
+        ]);
+
+        $createResponse->assertCreated();
+        $workOrderId = (int) $createResponse->json('work_order.id');
+
+        Sanctum::actingAs($technician, ['role:technician']);
+        $this->patchJson("/api/technician/work-orders/{$workOrderId}/start")->assertOk();
+        $this->patchJson("/api/technician/work-orders/{$workOrderId}/complete", [
+            'resolution_summary' => 'Completed direct manual task.',
+            'completion_note' => 'Completed direct manual task.',
+            'problem_found' => 'Loose fitting was identified during inspection.',
+            'probable_cause' => 'Loose Connection',
+            'diagnostic_steps' => [
+                'Inspected mounting hardware and connection torque.',
+                'Verified stability after correction.',
+            ],
+            'action_taken' => 'Secured the fitting and verified stable operation.',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('work_orders', [
+            'id' => $workOrderId,
+            'request_id' => null,
+            'work_status' => 'completed',
+        ]);
+
+        Sanctum::actingAs($supervisor, ['role:supervisor']);
+        $closeResponse = $this->patchJson("/api/supervisor/work-orders/{$workOrderId}/close");
+
+        $closeResponse->assertOk();
+        $this->assertDatabaseHas('work_orders', [
+            'id' => $workOrderId,
+            'work_status' => 'completed',
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $technician->id,
+            'type' => 'work_order_closed',
+            'related_id' => $workOrderId,
+        ]);
     }
 
     private function createCoreFixtures(): array

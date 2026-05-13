@@ -22,13 +22,7 @@ type EditRequest = {
   room_name?: string | null;
   custom_location: string | null;
   priority: "low" | "medium" | "high" | "urgent";
-};
-
-type RequestStatusCheckResponse = {
-  success: boolean;
-  request: {
-    status: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed";
-  };
+  status?: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed" | "cancelled";
 };
 
 type RequestDetailForEditResponse = {
@@ -42,6 +36,7 @@ type RequestDetailForEditResponse = {
     building_id?: number | null;
     room_id?: number | null;
     custom_location?: string | null;
+    status: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed" | "cancelled";
     category?: { id?: number; name?: string | null } | null;
     building?: { id?: number; name?: string | null } | null;
     room?: { id?: number; name?: string | null } | null;
@@ -55,14 +50,6 @@ type SettingsResponse = {
       building_id: number | null;
       room_id: number | null;
     };
-  };
-};
-
-type CreateRequestResponse = {
-  success: boolean;
-  message: string;
-  request: {
-    id: number;
   };
 };
 
@@ -106,12 +93,16 @@ const SubmitRequest: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isEditabilityLoading, setIsEditabilityLoading] = useState(false);
   const [isEditLocked, setIsEditLocked] = useState(false);
+  const [isResubmitting, setIsResubmitting] = useState(false); // New state for resubmission
   const [queryEditData, setQueryEditData] = useState<EditRequest | null>(null);
   const [defaultsApplied, setDefaultsApplied] = useState(false);
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+
+  const requestIdToResubmit = useMemo(() => location.state?.requestIdToResubmit ?? null, [location.state]);
+
 
   const [images, setImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
@@ -138,9 +129,11 @@ const SubmitRequest: React.FC = () => {
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
   }, [location.search]);
-  const editData = editDataFromState ?? queryEditData ?? undefined;
+  const editData = editDataFromState ?? queryEditData ?? undefined; // This is the data used to pre-fill the form
   const editLockedMessage = "This request is under review and can no longer be modified.";
   const isEditMode = Boolean(editData?.id);
+  const isExpectingEditData = Boolean(editDataFromState || editIdFromQuery || requestIdToResubmit);
+  const isInitialEditDataLoading = isExpectingEditData && !editData;
   const isFormDisabled = isEditMode && (isEditabilityLoading || isEditLocked);
 
   useEffect(() => {
@@ -193,13 +186,21 @@ const SubmitRequest: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (editDataFromState || !editIdFromQuery) return;
+    // If we have editDataFromState, or neither editIdFromQuery nor requestIdToResubmit, then return
+    if (editDataFromState || (!editIdFromQuery && !requestIdToResubmit)) {
+      return;
+    }
+
     let cancelled = false;
 
-    const loadEditDataFromQuery = async () => {
+    const loadEditDataFromQuery = async (requestId?: number | null) => {
       try {
+        const idToLoad = requestId ?? editIdFromQuery;
+        if (idToLoad == null) {
+          return;
+        }
         const data = await apiRequest<RequestDetailForEditResponse>(
-          `/api/requester/requests/${editIdFromQuery}`,
+          `/api/requester/requests/${idToLoad}`,
           { method: "GET" },
           true
         );
@@ -217,19 +218,31 @@ const SubmitRequest: React.FC = () => {
           room_name: req.room?.name ?? null,
           custom_location: req.custom_location ?? null,
           priority: req.priority,
+          status: req.status,
         };
         setQueryEditData(mapped);
       } catch {
-        if (cancelled) return;
-        setError("Failed to load request data for editing.");
+        if (!cancelled) {
+          setError("Failed to load request data.");
+        }
       }
     };
 
-    loadEditDataFromQuery();
+    if (editIdFromQuery) {
+      loadEditDataFromQuery();
+    } else if (requestIdToResubmit) {
+      loadEditDataFromQuery(requestIdToResubmit);
+      setIsResubmitting(true); // Set resubmitting flag
+    }
     return () => {
       cancelled = true;
     };
-  }, [editDataFromState, editIdFromQuery]);
+  }, [editDataFromState, editIdFromQuery, requestIdToResubmit]);
+
+  useEffect(() => {
+    if (!editData?.status) return;
+    setIsResubmitting(editData.status === "rejected" || editData.status === "cancelled");
+  }, [editData]);
 
   useEffect(() => {
     if (!editData) return;
@@ -257,7 +270,7 @@ const SubmitRequest: React.FC = () => {
   }, [editData, categories, buildings, rooms]);
 
   useEffect(() => {
-    if (!editData) return;
+    if (!editData || isResubmitting) return; // Don't apply room logic if resubmitting
     if (!formData.building || formData.room || !editData.room_name) return;
 
     const resolvedRoom = rooms.find((r) => normalizeName(r.name) === normalizeName(editData.room_name));
@@ -273,34 +286,15 @@ const SubmitRequest: React.FC = () => {
       return;
     }
 
-    let cancelled = false;
+    setIsEditabilityLoading(false);
 
-    const checkEditability = async () => {
-      setIsEditabilityLoading(true);
-      try {
-        const data = await apiRequest<RequestStatusCheckResponse>(
-          `/api/requester/requests/${editData.id}`,
-          { method: "GET" },
-          true
-        );
-        if (cancelled) return;
-        const isSubmitted = data.request?.status === "submitted";
-        setIsEditLocked(!isSubmitted);
-      } catch {
-        if (cancelled) return;
-        setIsEditLocked(true);
-      } finally {
-        if (!cancelled) {
-          setIsEditabilityLoading(false);
-        }
-      }
-    };
+    if (isResubmitting) {
+      setIsEditLocked(false);
+      return;
+    }
 
-    checkEditability();
-    return () => {
-      cancelled = true;
-    };
-  }, [editData?.id]);
+    setIsEditLocked(editData.status !== "submitted");
+  }, [editData?.id, editData?.status, isResubmitting]);
 
   useEffect(() => {
     const loadRooms = async () => {
@@ -364,7 +358,7 @@ const SubmitRequest: React.FC = () => {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isEditLocked) {
+    if (isEditLocked && !isResubmitting) { // Allow resubmitting locked requests
       setError(editLockedMessage);
       return;
     }
@@ -395,7 +389,7 @@ const SubmitRequest: React.FC = () => {
         }, true);
         requestId = editData.id;
       } else {
-        const created = await apiRequest<CreateRequestResponse>("/api/requester/requests", {
+        const created = await apiRequest<{ success: boolean; request: { id: number } }>("/api/requester/requests", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -441,12 +435,28 @@ const SubmitRequest: React.FC = () => {
     );
   }
 
+  if (isInitialEditDataLoading) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-6 pb-20 px-4 pt-6">
+        <div className="bg-white rounded-[2.5rem] p-8 shadow-xl border border-slate-100 text-center">
+          <div className="w-10 h-10 mx-auto border-4 border-slate-100 border-t-[#003366] rounded-full animate-spin mb-4" />
+          <h2 className="text-lg font-black text-slate-900">
+            Loading your request...
+          </h2>
+          <p className="text-sm text-slate-500 mt-2 font-semibold">
+            We are preparing your form details so you can edit without confusion.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-2xl mx-auto space-y-6 pb-20 px-4 pt-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-slate-900 leading-tight">
-            {editData ? "Update Request" : "Report Facility Issue"}
+            {isEditMode ? (isResubmitting ? "Update & Resubmit Request" : "Update Request") : "Report Facility Issue"}
           </h1>
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mt-1">Section {step} of 3</p>
         </div>
@@ -463,7 +473,7 @@ const SubmitRequest: React.FC = () => {
         </div>
       )}
 
-      {isEditMode && isEditLocked && (
+      {isEditMode && isEditLocked && !isResubmitting && ( // Only show lock message for actual edits
         <div className="rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800 flex items-center gap-3 animate-in slide-in-from-top-2">
           <AlertCircle size={20} /> {editLockedMessage}
         </div>
@@ -627,7 +637,7 @@ const SubmitRequest: React.FC = () => {
             <div className="pt-4 flex gap-4">
               <button type="button" onClick={() => setStep(2)} className="flex-1 py-5 bg-slate-50 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest border border-slate-200">Back</button>
               <button type="submit" disabled={isSubmitting} className="flex-2 py-5 bg-[#003366] text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-2xl flex items-center justify-center space-x-3 active:scale-95 transition-all">
-                {isSubmitting ? <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin" /> : <><span>{editData ? "Update Request" : "Submit Report"}</span><Send size={16} /></>}
+                {isSubmitting ? <div className="w-5 h-5 border-3 border-white/30 border-t-white rounded-full animate-spin" /> : <><span>{isEditMode ? (isResubmitting ? "Update & Resubmit" : "Update Request") : "Submit Report"}</span><Send size={16} /></>}
               </button>
             </div>
           </div>

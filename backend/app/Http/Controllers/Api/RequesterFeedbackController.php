@@ -21,10 +21,15 @@ class RequesterFeedbackController extends ModuleController
             return $this->forbidden();
         }
 
-        if ($ticket->status !== 'closed') {
+        $requesterApprovedCompletion = $ticket->statusLogs()
+            ->where('new_status', 'completed')
+            ->where('comment', 'like', 'Requester approved the completed work.%')
+            ->exists();
+
+        if ($ticket->status !== 'closed' && !($ticket->status === 'completed' && $requesterApprovedCompletion)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Rating is allowed only after supervisor closure.',
+                'message' => 'Rating is allowed after requester approval or request closure.',
             ], 422);
         }
 

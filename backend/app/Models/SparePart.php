@@ -17,6 +17,7 @@ class SparePart extends Model
         'unit_price',
         'quantity_available',
         'minimum_stock',
+        'image_path',
     ];
 
     protected $casts = [

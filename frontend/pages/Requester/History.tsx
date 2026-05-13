@@ -1,62 +1,63 @@
-
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Filter, ChevronRight, FilterX } from 'lucide-react';
+import { Search, Filter, ChevronRight, FilterX, History, Calendar, Hash } from 'lucide-react';
 import StatusBadge from '../../components/StatusBadge';
-import { TicketStatus, Priority } from '../../types';
+import { MaintenanceRequest, TicketStatus, Priority } from '../../types';
 import { apiRequest } from '../../lib/api';
 import RequestDetailModal from '../../components/RequestDetailModal';
 import { TableRowsSkeleton } from '../../components/PageSkeleton';
 
+// ... (Types and Mappers stay the same as your logic)
 type ApiRequestItem = {
   id: number;
   title: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
-  status: 'submitted' | 'approved' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'closed';
+  status: 'submitted' | 'approved' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'closed' | 'cancelled';
   created_at: string;
 };
 
 type PaginatedResponse = {
   success: boolean;
-  requests: {
-    data: ApiRequestItem[];
-  };
+  requests: { data: ApiRequestItem[] };
 };
 
 const statusFromApi = (status: ApiRequestItem['status']): TicketStatus => {
-  switch (status) {
-    case 'submitted':
-      return TicketStatus.PENDING;
-    case 'approved':
-      return TicketStatus.APPROVED;
-    case 'assigned':
-      return TicketStatus.ASSIGNED;
-    case 'in_progress':
-      return TicketStatus.IN_PROGRESS;
-    case 'completed':
-      return TicketStatus.COMPLETED;
-    case 'closed':
-      return TicketStatus.CLOSED;
-    case 'rejected':
-      return TicketStatus.REJECTED;
-    default:
-      return TicketStatus.PENDING;
-  }
+  const map: Record<string, TicketStatus> = {
+    submitted: TicketStatus.PENDING,
+    approved: TicketStatus.APPROVED,
+    assigned: TicketStatus.ASSIGNED,
+    in_progress: TicketStatus.IN_PROGRESS,
+    completed: TicketStatus.COMPLETED,
+    closed: TicketStatus.CLOSED,
+    rejected: TicketStatus.REJECTED,
+    cancelled: TicketStatus.CANCELLED,
+  };
+  return map[status] || TicketStatus.PENDING;
 };
 
 const priorityFromApi = (priority: ApiRequestItem['priority']): Priority => {
-  switch (priority) {
-    case 'low':
-      return Priority.LOW;
-    case 'medium':
-      return Priority.MEDIUM;
-    case 'high':
-      return Priority.HIGH;
-    case 'urgent':
-      return Priority.CRITICAL;
-    default:
-      return Priority.MEDIUM;
-  }
+  const map: Record<string, Priority> = {
+    low: Priority.LOW,
+    medium: Priority.MEDIUM,
+    high: Priority.HIGH,
+    urgent: Priority.CRITICAL,
+  };
+  return map[priority] || Priority.MEDIUM;
 };
+
+const mapApiRequestItemToMaintenanceRequest = (item: ApiRequestItem): MaintenanceRequest => ({
+  id: String(item.id),
+  title: item.title,
+  requesterId: '',
+  requesterName: 'Requester',
+  department: '',
+  location: '',
+  problemType: '',
+  urgency: priorityFromApi(item.priority),
+  description: '',
+  status: statusFromApi(item.status),
+  createdAt: item.created_at,
+  updatedAt: item.created_at,
+});
 
 const RequesterHistory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -65,6 +66,7 @@ const RequesterHistory: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
+  const selectedRequest = activeRequestId !== null ? items.find((req) => req.id === activeRequestId) : undefined;
 
   useEffect(() => {
     const load = async () => {
@@ -74,144 +76,172 @@ const RequesterHistory: React.FC = () => {
         const params = new URLSearchParams();
         if (searchTerm.trim()) params.set('search', searchTerm.trim());
         if (statusFilter !== 'all') params.set('status', statusFilter);
-
-        const query = params.toString();
-        const data = await apiRequest<PaginatedResponse>(
-          `/api/requester/requests${query ? `?${query}` : ''}`,
-          { method: 'GET' },
-          true
-        );
+        const data = await apiRequest<PaginatedResponse>(`/api/requester/requests?${params.toString()}`, { method: 'GET' }, true);
         setItems(data.requests?.data ?? []);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to load request history.';
-        setError(message);
+        setError(err instanceof Error ? err.message : 'Failed to load history.');
       } finally {
         setLoading(false);
       }
     };
-
-    const handle = setTimeout(load, 250);
+    const handle = setTimeout(load, 300);
     return () => clearTimeout(handle);
   }, [searchTerm, statusFilter]);
 
-  const history = useMemo(() => items, [items]);
-
   return (
-    <div className="space-y-6 pb-20">
-      <div>
-        <h1 className="text-3xl font-black text-gray-900 leading-none">My Requests</h1>
-        <p className="text-sm text-gray-500 mt-2 font-medium italic">History and real-time status archive</p>
-      </div>
-
-      <div className="bg-white rounded-4xl shadow-soft border border-gray-100 overflow-hidden">
-        {/* Search & Filter Bar */}
-        <div className="p-6 border-b flex flex-col md:flex-row gap-4 items-center">
-          <div className="relative flex-1 w-full">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+    <div className="max-w-7xl mx-auto px-4 pb-32 pt-6 space-y-8 animate-in fade-in duration-700">
+      
+      {/* 1. Page Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+             <History size={16} className="text-blue-600" />
+             <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">System Logs</p>
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">Request History</h1>
+        </div>
+        
+        {/* Search & Filter Compact Box */}
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
             <input 
               type="text"
-              className="w-full pl-12 pr-4 py-3 bg-gray-50/50 rounded-xl border border-gray-100 outline-none focus:ring-4 focus:ring-blue-500/5 transition-all font-medium text-sm text-gray-900 placeholder:text-gray-400"
+              placeholder="Search by title..."
+              className="w-full sm:w-64 pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 transition-all"
               value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="flex items-center space-x-2 w-full md:w-auto">
-            <div className="flex items-center bg-gray-50/50 px-4 rounded-xl border border-gray-100 flex-1 md:flex-none">
-              <Filter size={16} className="text-gray-400 mr-2" />
-              <select 
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                className="bg-transparent border-none text-[10px] font-black uppercase tracking-widest text-gray-600 outline-none cursor-pointer py-3"
-              >
-                <option value="all">Status: All</option>
-                <option value="submitted">Submitted</option>
-                <option value="approved">Approved</option>
-                <option value="assigned">Assigned</option>
-                <option value="in_progress">In Progress</option>
-                <option value="completed">Completed</option>
-                <option value="rejected">Rejected</option>
-                <option value="closed">Closed</option>
-              </select>
-            </div>
-            {(searchTerm || statusFilter !== 'all') && (
-              <button 
-                onClick={() => { setSearchTerm(''); setStatusFilter('all'); }}
-                className="p-3 text-red-500 bg-red-50 rounded-xl hover:bg-red-100 transition-colors"
-              >
-                <FilterX size={18} />
-              </button>
-            )}
+          
+          <div className="flex items-center bg-white border border-slate-200 rounded-2xl px-4">
+            <Filter size={14} className="text-slate-400 mr-2" />
+            <select 
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="bg-transparent border-none text-[10px] font-black uppercase tracking-widest text-slate-600 outline-none py-3 cursor-pointer"
+            >
+              <option value="all">All Status</option>
+              <option value="submitted">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
           </div>
-        </div>
 
-        {/* Requests Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-gray-50/30 text-[10px] font-black text-gray-500 uppercase tracking-widest border-b border-gray-100">
-              <tr>
-                <th className="px-8 py-5">Title</th>
-                <th className="px-8 py-5">Priority</th>
-                <th className="px-8 py-5">Status</th>
-                <th className="px-8 py-5">Date</th>
-                <th className="px-8 py-5 text-right">View</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {loading && (
-                <TableRowsSkeleton rows={4} cols={5} />
-              )}
-              {error && (
+          {(searchTerm || statusFilter !== 'all') && (
+            <button 
+              onClick={() => { setSearchTerm(''); setStatusFilter('all'); }}
+              className="p-3 bg-rose-50 text-rose-600 rounded-2xl hover:bg-rose-100 transition-colors"
+            >
+              <FilterX size={20} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Content Area */}
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="p-8"><TableRowsSkeleton rows={5} /></div>
+        ) : error ? (
+          <div className="p-20 text-center text-rose-500 font-bold">{error}</div>
+        ) : items.length > 0 ? (
+          <div className="overflow-x-auto">
+            {/* Desktop Table View */}
+            <table className="w-full text-left hidden md:table">
+              <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
                 <tr>
-                  <td className="px-8 py-8 text-sm font-bold text-red-600" colSpan={5}>{error}</td>
+                  <th className="px-8 py-5">Request Info</th>
+                  <th className="px-8 py-5">Priority</th>
+                  <th className="px-8 py-5">Status</th>
+                  <th className="px-8 py-5">Submitted Date</th>
+                  <th className="px-8 py-5 text-right">Action</th>
                 </tr>
-              )}
-              {history.map((req) => (
-                <tr 
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {items.map((req) => (
+                  <tr 
+                    key={req.id} 
+                    onClick={() => setActiveRequestId(req.id)}
+                    className="hover:bg-blue-50/30 transition-all cursor-pointer group"
+                  >
+                    <td className="px-8 py-6">
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-white group-hover:text-blue-600 transition-all">
+                          <Hash size={18} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-slate-900 group-hover:text-blue-600 transition-colors">{req.title}</p>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Ticket #MR-{req.id}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <StatusBadge priority={priorityFromApi(req.priority)} />
+                    </td>
+                    <td className="px-8 py-6">
+                      <StatusBadge status={statusFromApi(req.status)} />
+                    </td>
+                    <td className="px-8 py-6 text-xs font-bold text-slate-500">
+                      {new Date(req.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+                    </td>
+                    <td className="px-8 py-6 text-right">
+                       <div className="inline-flex p-2 rounded-xl border border-slate-100 bg-white group-hover:border-blue-200 group-hover:shadow-sm transition-all">
+                         <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-600" />
+                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden divide-y divide-slate-50">
+              {items.map((req) => (
+                <button 
                   key={req.id} 
                   onClick={() => setActiveRequestId(req.id)}
-                  className="hover:bg-blue-50/20 transition-all group"
+                  className="w-full p-6 flex flex-col gap-4 text-left active:bg-slate-50"
                 >
-                  <td className="px-8 py-6">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm font-black text-gray-900 group-hover:text-blue-600 transition-colors">{req.title}</p>
-                      <p className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">ID: MR-{req.id}</p>
+                      <p className="text-sm font-black text-slate-900 line-clamp-1">{req.title}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">#MR-{req.id}</p>
                     </div>
-                  </td>
-                  <td className="px-8 py-6">
-                    <StatusBadge priority={priorityFromApi(req.priority)} />
-                  </td>
-                  <td className="px-8 py-6">
                     <StatusBadge status={statusFromApi(req.status)} />
-                  </td>
-                  <td className="px-8 py-6">
-                    <p className="text-xs font-bold text-gray-600">{new Date(req.created_at).toLocaleDateString()}</p>
-                  </td>
-                  <td className="px-8 py-6 text-right">
-                    <div className="flex items-center justify-end space-x-3">
-                      <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 group-hover:border-blue-200 transition-all">
-                        <ChevronRight size={16} className="text-gray-400 group-hover:text-blue-600" />
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-4">
+                      <StatusBadge priority={priorityFromApi(req.priority)} />
+                      <div className="flex items-center gap-1.5 text-slate-400">
+                        <Calendar size={12} />
+                        <span className="text-[10px] font-bold">{new Date(req.created_at).toLocaleDateString()}</span>
                       </div>
                     </div>
-                  </td>
-                </tr>
+                    <ChevronRight size={18} className="text-blue-600" />
+                  </div>
+                </button>
               ))}
-            </tbody>
-          </table>
-        </div>
-
-        {!loading && !error && history.length === 0 && (
-          <div className="p-24 text-center">
-            <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-6 text-gray-200">
-              <Search size={40} />
             </div>
-            <h3 className="text-xl font-black text-gray-900 uppercase tracking-widest">No Requests Found</h3>
-            <p className="text-sm text-gray-500 mt-2 font-medium">Try adjusting your filters or report a new issue.</p>
+          </div>
+        ) : (
+          /* Empty State */
+          <div className="py-32 text-center flex flex-col items-center">
+            <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mb-6 text-slate-200">
+              <History size={48} strokeWidth={1} />
+            </div>
+            <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">No Records Found</h3>
+            <p className="text-sm text-slate-500 mt-2 font-medium">We couldn't find any requests matching your criteria.</p>
           </div>
         )}
       </div>
 
-      {activeRequestId && (
+      {/* Modal Detail View */}
+      {selectedRequest && (
         <RequestDetailModal
-          request={{ id: String(activeRequestId) } as any}
+          request={mapApiRequestItemToMaintenanceRequest(selectedRequest)}
           onClose={() => setActiveRequestId(null)}
         />
       )}

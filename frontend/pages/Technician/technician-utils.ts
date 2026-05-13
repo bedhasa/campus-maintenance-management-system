@@ -6,9 +6,24 @@ export type TechnicianRequestSummary = {
   status?: string;
   due_date?: string | null;
   created_at?: string;
+  statusLogs?: Array<{
+    id: number;
+    new_status?: string;
+    comment?: string | null;
+    created_at?: string;
+    changedBy?: { fname?: string; lname?: string } | null;
+  }>;
+  status_logs?: Array<{
+    id: number;
+    new_status?: string;
+    comment?: string | null;
+    created_at?: string;
+    changedBy?: { fname?: string; lname?: string } | null;
+  }>;
   category?: { id?: number; name?: string } | null;
   building?: { id?: number; name?: string } | null;
   room?: { id?: number; name?: string } | null;
+  custom_location?: string | null;
   images?: Array<{ id: number; image_path: string }>;
   rating?: {
     rating?: number;
@@ -24,9 +39,15 @@ export type TechnicianRequestSummary = {
   }>;
 };
 
+export type TechnicianLifecycleMeta = {
+  label: string;
+  tone: string;
+};
+
 export type TechnicianWorkOrder = {
   id: number;
   work_status: "assigned" | "in_progress" | "paused" | "completed" | string;
+  expected_completion_date?: string | null;
   delay_reason?: string | null;
   completion_note?: string | null;
   problem_found?: string | null;
@@ -90,6 +111,9 @@ export const getTaskLocation = (task: TechnicianWorkOrder) => {
   if (building || room) {
     return `Building: ${building || "-"} | Room: ${room || "-"}`;
   }
+  if (task.request?.custom_location?.trim()) {
+    return `Custom Location: ${task.request.custom_location.trim()}`;
+  }
   return "Location not specified";
 };
 
@@ -119,6 +143,27 @@ export const getStatusTone = (status?: string | null) => {
     default:
       return "bg-slate-50 text-slate-700 border-slate-100";
   }
+};
+
+export const getTechnicianLifecycleMeta = (task?: TechnicianWorkOrder | null): TechnicianLifecycleMeta => {
+  if (task?.request?.status === "closed") {
+    return {
+      label: "Completed",
+      tone: "bg-emerald-50 text-emerald-700 border-emerald-100",
+    };
+  }
+
+  if (task?.work_status === "completed") {
+    return {
+      label: "Awaiting Approval",
+      tone: "bg-blue-50 text-blue-700 border-blue-100",
+    };
+  }
+
+  return {
+    label: getStatusLabel(task?.work_status),
+    tone: getStatusTone(task?.work_status),
+  };
 };
 
 export const getPriorityLabel = (priority?: string | null) => {

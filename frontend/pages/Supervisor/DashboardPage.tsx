@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
-import DonutChart from "@/components/supervisor/analytics/DonutChart";
-import TrendLineChart from "@/components/supervisor/analytics/TrendLineChart";
 import {
   Activity,
   AlertTriangle,
@@ -63,6 +62,16 @@ type RecentActivity = {
   description: string;
   at: string;
 };
+
+const DonutChart = dynamic(() => import("@/components/supervisor/analytics/DonutChart"), {
+  ssr: false,
+  loading: () => <div className="h-[280px] animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />,
+});
+
+const TrendLineChart = dynamic(() => import("@/components/supervisor/analytics/TrendLineChart"), {
+  ssr: false,
+  loading: () => <div className="h-[280px] animate-pulse rounded-2xl border border-slate-200 bg-slate-100" />,
+});
 
 export default function SupervisorDashboardPage() {
   const [data, setData] = useState<DashboardPayload | null>(null);

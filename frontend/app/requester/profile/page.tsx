@@ -15,6 +15,8 @@ import {
   EyeOff,
   AlertCircle,
   Save,
+  Edit3,
+  X,
   CheckCircle2,
 } from "lucide-react";
 
@@ -29,6 +31,8 @@ type ProfileResponse = {
     university_id_number: string;
     phone: string;
     profile_picture_url?: string | null;
+    avg_rating?: number | null;
+    total_ratings?: number | null;
     department?: { name: string; faculty: string } | null;
   };
 };
@@ -44,6 +48,7 @@ export default function ProfilePage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success">("idle");
@@ -63,8 +68,11 @@ export default function ProfilePage() {
     profilePictureUrl: "",
   });
   const [initialForm, setInitialForm] = useState({
+    fname: "",
+    lname: "",
     username: "",
     phone: "",
+    email: "",
     profilePictureUrl: "",
   });
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -74,6 +82,10 @@ export default function ProfilePage() {
     currentPassword: "",
     newPassword: "",
     confirmPassword: "",
+  });
+  const [ratingSummary, setRatingSummary] = useState({
+    average: 0,
+    total: 0,
   });
 
   const loadProfile = async () => {
@@ -93,9 +105,16 @@ export default function ProfilePage() {
       };
       setForm(nextForm);
       setInitialForm({
+        fname: nextForm.fname,
+        lname: nextForm.lname,
         username: nextForm.username,
+        email: nextForm.email,
         phone: nextForm.phone,
-        profilePictureUrl: nextForm.profilePictureUrl,
+        profilePictureUrl: nextForm.profilePictureUrl
+      });
+      setRatingSummary({
+        average: Number(data.profile.avg_rating ?? 0),
+        total: Number(data.profile.total_ratings ?? 0),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load profile.");
@@ -119,9 +138,30 @@ export default function ProfilePage() {
   const fullName = `${form.fname} ${form.lname}`.trim() || currentUser?.name || "User";
   const effectivePicture = form.profilePictureUrl || currentUser?.profilePicture || "";
   const hasChanges =
+    form.fname !== initialForm.fname ||
+    form.lname !== initialForm.lname ||
     form.username !== initialForm.username ||
+    form.email !== initialForm.email ||
     form.phone !== initialForm.phone ||
     selectedImage !== null;
+
+  const handleCancel = () => {
+    setForm((prev) => ({
+      ...prev,
+      fname: initialForm.fname,
+      lname: initialForm.lname,
+      username: initialForm.username,
+      email: initialForm.email,
+      phone: initialForm.phone,
+      profilePictureUrl: initialForm.profilePictureUrl,
+    }));
+    setSelectedImage(null);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      setPreviewUrl(null);
+    }
+    setIsEditing(false);
+  };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,6 +186,9 @@ export default function ProfilePage() {
     try {
       const body = new FormData();
       body.append("_method", "PUT");
+      body.append("fname", form.fname.trim());
+      body.append("lname", form.lname.trim());
+      body.append("email", form.email.trim());
       body.append("username", form.username.trim().toLowerCase());
       body.append("phone", form.phone.trim());
       if (selectedImage) body.append("profile_picture", selectedImage);
@@ -175,8 +218,16 @@ export default function ProfilePage() {
       localStorage.setItem("user", JSON.stringify(mergedStoredUser));
       writeAuthUser(mergedStoredUser);
 
-      setForm((prev) => ({ ...prev, profilePictureUrl: updatedPicture, username: data.profile.username, phone: data.profile.phone }));
-      setInitialForm((prev) => ({ ...prev, profilePictureUrl: updatedPicture, username: data.profile.username, phone: data.profile.phone }));
+      const finalData = {
+        fname: data.profile.fname,
+        lname: data.profile.lname,
+        username: data.profile.username,
+        email: data.profile.email,
+        phone: data.profile.phone,
+        profilePictureUrl: updatedPicture
+      };
+      setForm(prev => ({ ...prev, ...finalData }));
+      setInitialForm(finalData);
       setSelectedImage(null);
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl);
@@ -184,6 +235,7 @@ export default function ProfilePage() {
       }
       setSaveStatus("success");
       setTimeout(() => setSaveStatus("idle"), 2500);
+      setIsEditing(false);
     } catch (err) {
       setSaveStatus("idle");
       setError(err instanceof Error ? err.message : "Failed to update profile data.");
@@ -232,22 +284,37 @@ export default function ProfilePage() {
           <p className="text-xs text-slate-500 mt-2 font-medium">Manage your identity and HU credentials</p>
         </div>
 
-        {hasChanges && (
+        {!isEditing ? (
           <button
-            onClick={handleSaveProfile}
-            disabled={saveStatus === "saving"}
-            className={`flex items-center justify-center space-x-2 px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all active:scale-95
-              ${saveStatus === "success" ? "bg-green-500 text-white" : "bg-[#003366] text-white hover:bg-blue-900"}`}
+            onClick={() => setIsEditing(true)}
+            className="flex items-center gap-2 bg-white border-2 border-slate-200 px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-600 hover:border-blue-500 hover:text-blue-600 transition-all active:scale-95 shadow-sm"
           >
-            {saveStatus === "saving" ? (
-              <span className="animate-spin text-sm">/</span>
-            ) : saveStatus === "success" ? (
-              <CheckCircle2 size={14} />
-            ) : (
-              <Save size={14} />
-            )}
-            <span>{saveStatus === "saving" ? "Updating..." : saveStatus === "success" ? "Updated!" : "Save Changes"}</span>
+            <Edit3 size={14} /> Edit Profile
           </button>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={handleCancel}
+              className="flex items-center gap-2 bg-slate-100 px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest text-slate-500 hover:bg-slate-200 transition-all active:scale-95"
+            >
+              <X size={14} /> Cancel
+            </button>
+            <button
+              onClick={handleSaveProfile}
+              disabled={saveStatus === "saving"}
+              className={`flex items-center justify-center space-x-2 px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all active:scale-95
+                ${saveStatus === "success" ? "bg-green-500 text-white" : "bg-slate-900 text-white hover:bg-blue-600"}`}
+            >
+              {saveStatus === "saving" ? (
+                <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : saveStatus === "success" ? (
+                <CheckCircle2 size={14} />
+              ) : (
+                <Save size={14} />
+              )}
+              <span>{saveStatus === "saving" ? "Saving..." : saveStatus === "success" ? "Updated!" : "Save Changes"}</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -310,6 +377,30 @@ export default function ProfilePage() {
               {t("securityNote") || "Security: Do not share your HU credentials with anyone."}
             </p>
           </div>
+
+          {currentUser?.role === "technician" && (
+            <div className="rounded-2rem border border-amber-100 bg-amber-50 p-5 shadow-sm">
+              <p className="text-[9px] font-black uppercase tracking-[0.25em] text-amber-700">
+                Average Rating
+              </p>
+              <div className="mt-3 flex items-end justify-between gap-4">
+                <div>
+                  <p className="text-3xl font-black leading-none text-slate-900">
+                    {ratingSummary.total > 0 ? ratingSummary.average.toFixed(1) : "0.0"}
+                  </p>
+                  <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-amber-800">
+                    {ratingSummary.total} {ratingSummary.total === 1 ? "review" : "reviews"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-white px-3 py-2 text-right">
+                  <p className="text-xs font-black text-amber-700">/ 5.0</p>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400">
+                    Requester Score
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="md:col-span-2 space-y-6">
@@ -320,10 +411,31 @@ export default function ProfilePage() {
 
             <div className="grid sm:grid-cols-2 gap-y-8 gap-x-8">
               <div className="space-y-2">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">{t("fullName")}</label>
-                <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 text-slate-500 font-bold text-sm cursor-not-allowed">
-                  {fullName}
-                </div>
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">{t("firstName") || "First Name"}</label>
+                {isEditing ? (
+                   <input
+                    type="text"
+                    value={form.fname}
+                    onChange={(e) => setForm((p) => ({ ...p, fname: e.target.value }))}
+                    className="w-full px-4 py-3.5 bg-white rounded-2xl border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-bold text-slate-900 transition-all text-sm"
+                  />
+                ) : (
+                  <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 text-slate-900 font-bold text-sm">{form.fname}</div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">{t("lastName") || "Last Name"}</label>
+                {isEditing ? (
+                   <input
+                    type="text"
+                    value={form.lname}
+                    onChange={(e) => setForm((p) => ({ ...p, lname: e.target.value }))}
+                    className="w-full px-4 py-3.5 bg-white rounded-2xl border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-bold text-slate-900 transition-all text-sm"
+                  />
+                ) : (
+                  <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 text-slate-900 font-bold text-sm">{form.lname}</div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -369,10 +481,22 @@ export default function ProfilePage() {
 
               <div className="space-y-2">
                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">{t("universityEmail")}</label>
-                <div className="flex items-center space-x-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 overflow-hidden">
-                  <Mail size={16} className="text-slate-400 shrink-0" />
-                  <p className="text-slate-900 font-bold text-sm truncate">{form.email}</p>
-                </div>
+                {isEditing ? (
+                  <div className="relative group">
+                    <Mail size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
+                      className="w-full pl-11 pr-4 py-3.5 bg-white rounded-2xl border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/5 outline-none font-bold text-slate-900 transition-all text-sm"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 overflow-hidden">
+                    <Mail size={16} className="text-slate-400 shrink-0" />
+                    <p className="text-slate-900 font-bold text-sm truncate">{form.email}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>

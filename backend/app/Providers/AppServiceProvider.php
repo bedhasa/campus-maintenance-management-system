@@ -31,7 +31,9 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('manage-users', [UserManagementPolicy::class, 'manage']);
 
         ResetPassword::createUrlUsing(function (object $notifiable, string $token) {
-            return config('app.frontend_url')."/password-reset/$token?email={$notifiable->getEmailForPasswordReset()}";
+            $encodedToken = rawurlencode($token);
+            $encodedEmail = rawurlencode($notifiable->getEmailForPasswordReset());
+            return config('app.frontend_url')."/reset-password?token={$encodedToken}&email={$encodedEmail}";
         });
     }
 }

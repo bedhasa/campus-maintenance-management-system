@@ -33,6 +33,8 @@ class MeProfileController extends ModuleController
                 'university_id_number' => $user->university_id_number,
                 'phone' => $user->phone,
                 'profile_picture_url' => $this->profilePictureUrl($user->profile_picture),
+                'avg_rating' => (float) ($user->avg_rating ?? 0),
+                'total_ratings' => (int) ($user->total_ratings ?? 0),
                 'department' => $user->department,
                 'roles' => $user->roles,
                 'specialties' => $user->specialties,
@@ -85,4 +87,3 @@ class MeProfileController extends ModuleController
         ]);
     }
 }
-

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { 
   X, MapPin, Wrench, FileText, MessageSquare, Send, 
   Clock, Phone, User, CheckCircle2, 
@@ -10,8 +10,10 @@ import {
 
 import { MaintenanceRequest, Priority, RequestMessage, TicketStatus } from '@/types';
 import StatusBadge from './StatusBadge';
+import OverlayMessage from './OverlayMessage';
 import { useApp } from '@/context/AppContext'; 
 import { apiRequest } from '@/lib/api';
+import { useLiveRefresh } from '@/lib/use-live-refresh';
 import { useNavigate } from '@/lib/router-dom-shim';
 
 interface RequestDetailModalProps {
@@ -52,17 +54,19 @@ type ApiRequestDetail = {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
-  status: 'submitted' | 'approved' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'closed';
+  status: 'submitted' | 'approved' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'closed' | 'cancelled';
   created_at: string;
   updated_at?: string;
   due_date?: string | null;
   category_id?: number | null;
   building_id?: number | null;
   room_id?: number | null;
+  asset_id?: number | null;
   custom_location?: string | null;
   category?: { id?: number; name: string } | null;
   building?: { id?: number; name: string } | null;
   room?: { id?: number; name: string } | null;
+  asset?: { id?: number; name: string } | null;
   requester?: ApiUser | null;
   statusLogs?: ApiStatusLog[];
   status_logs?: ApiStatusLog[];
@@ -72,6 +76,8 @@ type ApiRequestDetail = {
     work_status: string;
     scheduled_date?: string | null;
     scheduled_time?: string | null;
+    started_at?: string | null;
+    paused_at?: string | null;
     assignee?: ApiUser | null;
   }>;
   rating?: {
@@ -86,6 +92,13 @@ type ParticipantState = {
   technician?: ApiUser | null;
 };
 
+type WorkOrderState = {
+  workStatus?: string | null;
+  scheduledTime?: string | null;
+  startedAt?: string | null;
+  pausedAt?: string | null;
+};
+
 type EditRequestState = {
   id: number;
   title: string;
@@ -97,7 +110,10 @@ type EditRequestState = {
   room_id: number | null;
   room_name?: string | null;
   custom_location: string | null;
+  asset_id: number | null;
+  asset_name?: string | null;
   priority: 'low' | 'medium' | 'high' | 'urgent';
+  status?: 'submitted' | 'approved' | 'assigned' | 'in_progress' | 'completed' | 'rejected' | 'closed' | 'cancelled';
 };
 
 type RequestDetailResponse = {
@@ -121,6 +137,8 @@ const apiStatusToTicketStatus = (status: ApiRequestDetail['status']): TicketStat
       return TicketStatus.CLOSED;
     case 'rejected':
       return TicketStatus.REJECTED;
+    case 'cancelled':
+      return TicketStatus.CANCELLED;
     default:
       return TicketStatus.PENDING;
   }
@@ -153,6 +171,36 @@ const actorFromLog = (log?: ApiStatusLog | null): ApiUser | null => {
   return null;
 };
 
+const formatTimeValue = (value?: string | null): string | null => {
+  if (!value) return null;
+
+  const directTimeMatch = value.match(/^(\d{1,2}):(\d{2})/);
+  if (directTimeMatch) {
+    return `${directTimeMatch[1].padStart(2, '0')}:${directTimeMatch[2]}`;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(parsed);
+};
+
+const hasRequesterApprovalPendingClosure = (detail: ApiRequestDetail): boolean => {
+  const logs = detail.statusLogs ?? detail.status_logs ?? [];
+  return (
+    detail.status === 'completed' &&
+    logs.some(
+      (log) =>
+        log.new_status === 'completed' &&
+        (log.comment ?? '').toLowerCase().includes('requester approved the completed work'),
+    )
+  );
+};
+
 const mapApiDetailToMaintenanceRequest = (
   detail: ApiRequestDetail,
   fallback: MaintenanceRequest
@@ -166,7 +214,7 @@ const mapApiDetailToMaintenanceRequest = (
   const requesterName = fullName(detail.requester) || fallback.requesterName || 'Requester';
   const location = detail.custom_location || [detail.building?.name, detail.room?.name].filter(Boolean).join(' / ') || fallback.location || '-';
   const scheduledAt = latestWorkOrder?.scheduled_date
-    ? `${latestWorkOrder.scheduled_date}${latestWorkOrder.scheduled_time ? ` ${latestWorkOrder.scheduled_time}` : ''}`
+    ? formatTimeValue(`${latestWorkOrder.scheduled_date}${latestWorkOrder.scheduled_time ? ` ${latestWorkOrder.scheduled_time}` : ''}`)
     : fallback.scheduledAt;
 
   return {
@@ -188,7 +236,7 @@ const mapApiDetailToMaintenanceRequest = (
     technicianName: fullName(latestWorkOrder?.assignee) || fullName(actorFromLog(assignedLog)) || fallback.technicianName,
     technicianPhone: latestWorkOrder?.assignee?.phone ?? actorFromLog(assignedLog)?.phone ?? fallback.technicianPhone,
     assignedAt: assignedLog?.created_at ?? fallback.assignedAt,
-    scheduledAt,
+    scheduledAt: scheduledAt ?? undefined,
     completedAt: completedLog?.created_at ?? fallback.completedAt,
     completionNotes: completedLog?.comment ?? fallback.completionNotes,
     rejectionReason: rejectedLog?.comment ?? fallback.rejectionReason,
@@ -214,7 +262,9 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [rawStatus, setRawStatus] = useState<ApiRequestDetail['status'] | null>(null);
   const [participants, setParticipants] = useState<ParticipantState>({});
   const [ratingForm, setRatingForm] = useState({ rating: 5, comment: '' });
@@ -222,6 +272,8 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [editRequestState, setEditRequestState] = useState<EditRequestState | null>(null);
+  const [workOrderState, setWorkOrderState] = useState<WorkOrderState>({});
+  const [requesterApprovalPendingClosure, setRequesterApprovalPendingClosure] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const baseRequest = useMemo(
@@ -236,11 +288,18 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     const match = raw.match(/\d+/);
     return match ? match[0] : raw;
   }, [initialRequest.id]);
-  const canEditRequest = request.status === TicketStatus.PENDING;
+  const canEditRequest =
+    rawStatus === 'submitted' ||
+    rawStatus === 'rejected' ||
+    rawStatus === 'cancelled' ||
+    (!rawStatus && (request.status === TicketStatus.PENDING || request.status === TicketStatus.REJECTED || request.status === TicketStatus.CANCELLED));
+  const canCancelRequest = rawStatus === 'submitted' || (!rawStatus && request.status === TicketStatus.PENDING);
   const chatLocked = rawStatus === 'closed';
-  const canSubmitFeedback = rawStatus === 'closed' && !request.rating;
+  const canSubmitFeedback = (rawStatus === 'closed' || requesterApprovalPendingClosure) && !request.rating;
+  const canRequesterReopenResolvedRequest =
+    rawStatus === 'closed' || (rawStatus === 'completed' && requesterApprovalPendingClosure);
 
-  const mapToEditState = (detail: ApiRequestDetail): EditRequestState => {
+  const mapToEditState = useCallback((detail: ApiRequestDetail): EditRequestState => {
     const categoryId = detail.category_id ?? detail.category?.id ?? null;
     return {
       id: detail.id,
@@ -253,9 +312,12 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
       room_id: detail.room_id ?? detail.room?.id ?? null,
       room_name: detail.room?.name ?? null,
       custom_location: detail.custom_location ?? null,
+      asset_id: detail.asset_id ?? detail.asset?.id ?? null,
+      asset_name: detail.asset?.name ?? null,
       priority: detail.priority,
+      status: detail.status,
     };
-  };
+  }, []);
 
   useEffect(() => {
     setRequest(baseRequest);
@@ -265,45 +327,69 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     setView(initialView);
   }, [initialView, initialRequest.id]);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadRequestDetail = useCallback(async (silent = false) => {
+    if (!endpointRequestId) return;
 
-    const loadRequestDetail = async () => {
-      try {
-        setLoadError(null);
-        const data = await apiRequest<RequestDetailResponse>(
-          `/api/requester/requests/${endpointRequestId}`,
-          { method: 'GET' },
-          true
-        );
-        if (cancelled) return;
-        setEditRequestState(mapToEditState(data.request));
-        setRawStatus(data.request.status);
-        setParticipants({
-          requester: data.request.requester ?? null,
-          technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
-        });
-        setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
-      } catch (error) {
-        if (cancelled) return;
-        setLoadError(error instanceof Error ? error.message : 'Failed to load request details.');
+    try {
+      if (!silent) {
+        setIsLoading(true);
+        setSuccessMessage(null);
       }
-    };
-
-    if (endpointRequestId) {
-      loadRequestDetail();
+      setLoadError(null);
+      const data = await apiRequest<RequestDetailResponse>(
+        `/api/requester/requests/${endpointRequestId}`,
+        { method: 'GET' },
+        true
+      );
+      setEditRequestState(mapToEditState(data.request));
+      setRawStatus(data.request.status);
+      setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
+      setParticipants({
+        requester: data.request.requester ?? null,
+        technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
+      const activeWorkOrder = (data.request.work_orders ?? [])[0];
+      setWorkOrderState({
+        workStatus: activeWorkOrder?.work_status ?? null,
+        scheduledTime: formatTimeValue(
+          activeWorkOrder?.scheduled_date
+            ? `${activeWorkOrder.scheduled_date}${activeWorkOrder.scheduled_time ? ` ${activeWorkOrder.scheduled_time}` : ''}`
+            : activeWorkOrder?.scheduled_time ?? null
+        ),
+        startedAt: activeWorkOrder?.started_at ?? null,
+        pausedAt: activeWorkOrder?.paused_at ?? null,
+      });
+      setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to load request details.');
+    } finally {
+      if (!silent) setIsLoading(false);
     }
+  }, [endpointRequestId, mapToEditState]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [endpointRequestId]);
+  useEffect(() => {
+    void loadRequestDetail();
+  }, [loadRequestDetail]);
+
+  useLiveRefresh(() => loadRequestDetail(true), { enabled: Boolean(endpointRequestId), intervalMs: 7000 });
 
   useEffect(() => {
     if (view === 'chat') {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [request.messages, view]);
+
+  useEffect(() => {
+    if (!loadError) return;
+    const timer = window.setTimeout(() => setLoadError(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [loadError]);
+
+  useEffect(() => {
+    if (!successMessage) return;
+    const timer = window.setTimeout(() => setSuccessMessage(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [successMessage]);
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -329,6 +415,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         true
       );
       setRawStatus(data.request.status);
+      setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
       setParticipants({
         requester: data.request.requester ?? null,
         technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
@@ -375,6 +462,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
           true
         );
         setRawStatus(data.request.status);
+        setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
         setParticipants({
           requester: data.request.requester ?? null,
           technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
@@ -415,6 +503,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
           true
         );
         setRawStatus(data.request.status);
+        setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
         setParticipants({
           requester: data.request.requester ?? null,
           technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
@@ -433,7 +522,8 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     try {
       setRatingSaving(true);
       setLoadError(null);
-      await apiRequest(
+      setSuccessMessage(null);
+      const response = await apiRequest<{ success: boolean; message?: string }>(
         `/api/requester/requests/${endpointRequestId}/rating`,
         {
           method: 'POST',
@@ -445,6 +535,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         },
         true
       );
+      setSuccessMessage(response.message || 'Feedback submitted.');
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
@@ -452,6 +543,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         true
       );
       setRawStatus(data.request.status);
+      setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
       setParticipants({
         requester: data.request.requester ?? null,
         technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
@@ -474,7 +566,8 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     try {
       setVerifyBusy(true);
       setLoadError(null);
-      await apiRequest(
+      setSuccessMessage(null);
+      const response = await apiRequest<{ success: boolean; message?: string }>(
         `/api/requester/requests/${endpointRequestId}/verify-completion`,
         {
           method: 'PATCH',
@@ -486,16 +579,35 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         },
         true
       );
+      setSuccessMessage(
+        response.message ||
+          (action === 'accept'
+            ? 'Request approved and closed. You can now provide feedback.'
+            : 'Request reopened for additional work.'),
+      );
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
         { method: 'GET' },
         true
       );
+      setEditRequestState(mapToEditState(data.request));
       setRawStatus(data.request.status);
+      setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
       setParticipants({
         requester: data.request.requester ?? null,
         technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
+      const activeWorkOrder = (data.request.work_orders ?? [])[0];
+      setWorkOrderState({
+        workStatus: activeWorkOrder?.work_status ?? null,
+        scheduledTime: formatTimeValue(
+          activeWorkOrder?.scheduled_date
+            ? `${activeWorkOrder.scheduled_date}${activeWorkOrder.scheduled_time ? ` ${activeWorkOrder.scheduled_time}` : ''}`
+            : activeWorkOrder?.scheduled_time ?? null
+        ),
+        startedAt: activeWorkOrder?.started_at ?? null,
+        pausedAt: activeWorkOrder?.paused_at ?? null,
       });
       setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
       setReopenReason('');
@@ -506,42 +618,77 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     }
   };
 
+  const handleReopenResolvedRequest = async () => {
+    if (!endpointRequestId || !canRequesterReopenResolvedRequest) return;
+    if (!reopenReason.trim()) {
+      setLoadError('Please explain why this completed request should be reopened.');
+      return;
+    }
+
+    try {
+      setVerifyBusy(true);
+      setLoadError(null);
+      setSuccessMessage(null);
+      const response = await apiRequest<{ success: boolean; message?: string }>(
+        `/api/requester/requests/${endpointRequestId}/reopen`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment: reopenReason.trim() }),
+        },
+        true
+      );
+      setSuccessMessage(response.message || 'Request reopened for additional work.');
+
+      const data = await apiRequest<RequestDetailResponse>(
+        `/api/requester/requests/${endpointRequestId}`,
+        { method: 'GET' },
+        true
+      );
+      setEditRequestState(mapToEditState(data.request));
+      setRawStatus(data.request.status);
+      setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
+      setParticipants({
+        requester: data.request.requester ?? null,
+        technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
+      const activeWorkOrder = (data.request.work_orders ?? [])[0];
+      setWorkOrderState({
+        workStatus: activeWorkOrder?.work_status ?? null,
+        scheduledTime: formatTimeValue(
+          activeWorkOrder?.scheduled_date
+            ? `${activeWorkOrder.scheduled_date}${activeWorkOrder.scheduled_time ? ` ${activeWorkOrder.scheduled_time}` : ''}`
+            : activeWorkOrder?.scheduled_time ?? null
+        ),
+        startedAt: activeWorkOrder?.started_at ?? null,
+        pausedAt: activeWorkOrder?.paused_at ?? null,
+      });
+      setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
+      setReopenReason('');
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to reopen request.');
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return null;
     const parsed = new Date(dateStr);
     if (Number.isNaN(parsed.getTime())) return dateStr;
     return new Intl.DateTimeFormat(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-      timeZoneName: 'short',
+      hour12: false,
     }).format(parsed);
   };
 
   const formatLifecycleTime = (dateStr?: string) => {
-    if (!dateStr) return null;
-    const parsed = new Date(dateStr);
-    if (Number.isNaN(parsed.getTime())) return dateStr;
-    return new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    }).format(parsed);
+    return formatTimeValue(dateStr);
   };
 
   const formatChatTime = (dateStr?: string) => {
-    if (!dateStr) return '';
-    const parsed = new Date(dateStr);
-    if (Number.isNaN(parsed.getTime())) return dateStr;
-    return new Intl.DateTimeFormat(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    }).format(parsed);
+    return formatTimeValue(dateStr) ?? '';
   };
 
   const getStepStatus = (step: 'pending' | 'approved' | 'assigned' | 'progress' | 'completed') => {
@@ -565,11 +712,79 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
       return;
     }
 
-    navigate(`/requester/submit?edit=${editRequestState.id}`, { state: { editRequest: editRequestState } });
+    const isResubmit = editRequestState.status === 'rejected' || editRequestState.status === 'cancelled';
+    navigate(`/requester/submit?edit=${editRequestState.id}`, {
+      state: {
+        editRequest: editRequestState,
+        requestIdToResubmit: isResubmit ? editRequestState.id : undefined,
+      },
+    });
     onClose();
   };
 
+  const handleCancelRequest = async () => {
+    if (!endpointRequestId || !canCancelRequest) return;
+    const confirmed = window.confirm('Cancel this pending request?');
+    if (!confirmed) return;
+
+    try {
+      setVerifyBusy(true);
+      setLoadError(null);
+      setSuccessMessage(null);
+      const response = await apiRequest<{ success: boolean; message?: string }>(
+        `/api/requester/requests/${endpointRequestId}/cancel`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+        true
+      );
+      setSuccessMessage(response.message || 'Request cancelled.');
+
+      const data = await apiRequest<RequestDetailResponse>(
+        `/api/requester/requests/${endpointRequestId}`,
+        { method: 'GET' },
+        true
+      );
+      setEditRequestState(mapToEditState(data.request));
+      setRawStatus(data.request.status);
+      setRequesterApprovalPendingClosure(hasRequesterApprovalPendingClosure(data.request));
+      setParticipants({
+        requester: data.request.requester ?? null,
+        technician: (data.request.work_orders ?? [])[0]?.assignee ?? null,
+      });
+      setRequest((prev) => mapApiDetailToMaintenanceRequest(data.request, prev));
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Failed to cancel request.');
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
+  const workProgressTitle =
+    workOrderState.workStatus === 'paused'
+      ? 'Maintenance Paused'
+      : workOrderState.workStatus === 'in_progress'
+        ? 'Maintenance Started'
+        : 'Maintenance In-Progress';
+
+  const workProgressTime =
+    workOrderState.workStatus === 'paused'
+      ? formatLifecycleTime(workOrderState.pausedAt ?? request.updatedAt)
+      : formatLifecycleTime(workOrderState.startedAt ?? request.updatedAt);
+
+  const workProgressNote =
+    workOrderState.workStatus === 'paused'
+      ? 'Work is temporarily paused.'
+      : workOrderState.workStatus === 'in_progress'
+        ? 'Work has started.'
+        : undefined;
+
   return (
+    <>
+    <OverlayMessage message={loadError} tone="error" />
+    <OverlayMessage message={successMessage} tone="success" />
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-100 flex items-end md:items-center justify-center p-0 md:p-6 animate-in fade-in duration-300">
       <div className="bg-white w-full max-w-2xl h-[92vh] md:h-auto md:max-h-[90vh] rounded-t-[2.5rem] md:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-slate-200 animate-in slide-in-from-bottom duration-500 md:zoom-in-95">
         
@@ -594,7 +809,20 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                 className="px-3 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest flex items-center space-x-1.5"
               >
                 <Edit2 size={12} />
-                <span>Edit Request</span>
+                <span>
+                  {rawStatus === 'rejected' || rawStatus === 'cancelled' || request.status === TicketStatus.REJECTED || request.status === TicketStatus.CANCELLED
+                    ? 'Edit & Resubmit'
+                    : 'Edit Request'}
+                </span>
+              </button>
+            )}
+            {canCancelRequest && (
+              <button
+                type="button"
+                onClick={() => void handleCancelRequest()}
+                className="px-3 py-2 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-xl transition-all text-[10px] font-black uppercase tracking-widest"
+              >
+                Cancel Request
               </button>
             )}
             <button onClick={onClose} className="p-2.5 bg-slate-50 text-slate-400 hover:text-slate-900 rounded-2xl transition-all">
@@ -623,18 +851,24 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 scrollbar-hide">
-          {loadError && (
-            <p className="text-xs text-rose-600 font-bold mb-3">{loadError}</p>
+          {!isLoading && view === 'info' && rawStatus === 'cancelled' && (
+            <p className="text-xs text-rose-700 font-bold mb-3">
+              This request was cancelled before supervisor review.
+            </p>
           )}
-          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-3">
-            Times shown in your device&apos;s local timezone
-          </p>
-          {!canEditRequest && view === 'info' && (
+          {!isLoading && view === 'info' && !canEditRequest && (
             <p className="text-xs text-amber-700 font-bold mb-3">
               This request is under review and can no longer be modified.
             </p>
           )}
-          {view === 'info' ? (
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-32 space-y-4">
+              <div className="w-10 h-10 border-4 border-slate-100 border-t-[#003366] rounded-full animate-spin"></div>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest animate-pulse">
+                {view === 'info' ? 'Loading Details...' : 'Loading Chat...'}
+              </p>
+            </div>
+          ) : view === 'info' ? (
             <div className="space-y-8 animate-in fade-in slide-in-from-left-2 duration-300">
               {rawStatus === 'submitted' && (
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-xs font-bold text-emerald-700">
@@ -694,8 +928,8 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-200">Active Technician</p>
                       <h3 className="text-xl font-black">{request.technicianName}</h3>
-                      {request.scheduledAt && (
-                        <p className="text-[11px] font-bold text-emerald-200 mt-2">Scheduled: {request.scheduledAt}</p>
+                      {(workOrderState.scheduledTime || request.scheduledAt) && (
+                        <p className="text-[11px] font-bold text-emerald-200 mt-2">Scheduled: {workOrderState.scheduledTime || request.scheduledAt}</p>
                       )}
                       <p className="text-[10px] font-bold text-blue-300 mt-0.5 uppercase tracking-widest">Maintenance Team • HU</p>
                     </div>
@@ -726,6 +960,15 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                     )}
                   </div>
                 </div>
+                {editRequestState?.asset_name && (
+                  <div className="flex items-start space-x-4">
+                    <div className="p-2.5 bg-white rounded-xl text-blue-500 shadow-sm border border-slate-50"><Wrench size={18} /></div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Linked Asset</p>
+                      <p className="text-sm font-bold text-slate-800">{editRequestState.asset_name}</p>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-start space-x-4">
                   <div className="p-2.5 bg-white rounded-xl text-blue-500 shadow-sm border border-slate-50"><Wrench size={18} /></div>
                   <div>
@@ -778,12 +1021,13 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       icon={<UserCheck size={14} />}
                     />
                     <TimelineStep 
-                      title="Maintenance In-Progress"
+                      title={workProgressTitle}
                       person={request.technicianName || "Assigned Tech"}
                       role="Field Work"
-                      date={formatLifecycleTime(request.updatedAt)} 
+                      date={workProgressTime}
                       status={getStepStatus('progress')}
                       icon={<PlayCircle size={14} />}
+                      note={workProgressNote}
                     />
                     <TimelineStep 
                       title="Resolution Verified"
@@ -836,13 +1080,13 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                 </section>
               )}
 
-              {rawStatus === 'completed' && (
+              {rawStatus === 'completed' && !requesterApprovalPendingClosure && (
                 <section className="rounded-[2.5rem] border border-blue-100 bg-blue-50/60 p-6 space-y-4">
                   <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-700">
-                    Verify Completion
+                    Approve Completed Work
                   </h3>
                   <p className="text-sm font-medium text-slate-700">
-                    Please confirm if the maintenance work is complete and acceptable.
+                    Confirm whether the maintenance work is acceptable. After your approval, the supervisor will do the final closure.
                   </p>
                   <textarea
                     value={reopenReason}
@@ -857,7 +1101,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       onClick={() => void handleVerifyCompletion('accept')}
                       className="w-full py-3 bg-emerald-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-emerald-700 disabled:opacity-50"
                     >
-                      {verifyBusy ? 'Processing...' : 'Accept and Close'}
+                      {verifyBusy ? 'Processing...' : 'Approve Completion'}
                     </button>
                     <button
                       type="button"
@@ -868,6 +1112,42 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       {verifyBusy ? 'Processing...' : 'Reject and Reopen'}
                     </button>
                   </div>
+                </section>
+              )}
+
+              {rawStatus === 'completed' && requesterApprovalPendingClosure && (
+                <section className="rounded-[2.5rem] border border-emerald-100 bg-emerald-50/60 p-6 space-y-3">
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-emerald-700">
+                    Requester Approval Sent
+                  </h3>
+                  <p className="text-sm font-medium text-slate-700">
+                    You already approved this completed work. The supervisor will still see it for final closure, and you can submit rating and feedback now.
+                  </p>
+                </section>
+              )}
+
+              {canRequesterReopenResolvedRequest && (
+                <section className="rounded-[2.5rem] border border-amber-100 bg-amber-50/60 p-6 space-y-4">
+                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-700">
+                    Reopen If Problem Persists
+                  </h3>
+                  <p className="text-sm font-medium text-slate-700">
+                    If the same issue happened again or was not fully fixed, you can reopen this maintenance request and send it back for additional work.
+                  </p>
+                  <textarea
+                    value={reopenReason}
+                    onChange={(e) => setReopenReason(e.target.value)}
+                    placeholder="Explain what is still failing or what happened again."
+                    className="w-full p-3 rounded-xl border border-amber-100 bg-white text-sm min-h-[90px]"
+                  />
+                  <button
+                    type="button"
+                    disabled={verifyBusy}
+                    onClick={() => void handleReopenResolvedRequest()}
+                    className="w-full py-3 bg-amber-500 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-amber-600 disabled:opacity-50"
+                  >
+                    {verifyBusy ? 'Processing...' : 'Reopen Request'}
+                  </button>
                 </section>
               )}
 
@@ -986,6 +1266,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         )}
       </div>
     </div>
+    </>
   );
 }
 

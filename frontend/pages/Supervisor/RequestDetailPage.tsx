@@ -9,7 +9,7 @@ import {
   HardHat, Phone, Mail, Hash, Layers, Building2, DoorOpen
 } from "lucide-react";
 
-interface Props { id: string; }
+interface Props { id: string; initialTab?: "details" | "chat"; }
 
 // Types (Restricted to your provided structure)
 type RequestDetail = {
@@ -53,9 +53,9 @@ const statusColors: Record<string, string> = {
   completed: "bg-emerald-600", closed: "bg-slate-900", rejected: "bg-rose-600",
 };
 
-export default function RequestDetailPage({ id }: Props) {
+export default function RequestDetailPage({ id, initialTab = "details" }: Props) {
   const [detail, setDetail] = useState<RequestDetail | null>(null);
-  const [activeTab, setActiveTab] = useState<"details" | "chat">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "chat">(initialTab);
   const [newMessage, setNewMessage] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -67,7 +67,8 @@ export default function RequestDetailPage({ id }: Props) {
   const [technicians, setTechnicians] = useState<TechnicianOption[]>([]);
   const [selectedTechId, setSelectedTechId] = useState("");
   const [techSearch, setTechSearch] = useState("");
-  const [scheduledDate, setScheduledDate] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [finishDate, setFinishDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -91,6 +92,10 @@ export default function RequestDetailPage({ id }: Props) {
     };
     void loadUser();
   }, [id, load]);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab, id]);
 
   useEffect(() => {
     if (chatRef.current && activeTab === "chat") {
@@ -183,6 +188,26 @@ export default function RequestDetailPage({ id }: Props) {
     await load();
   };
 
+  const updateMessage = async (messageId: number) => {
+    if (!editingText.trim() || chatLocked) return;
+    await apiRequest(`/api/supervisor/requests/${id}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: editingText.trim() }),
+    }, true);
+    setEditingId(null);
+    setEditingText("");
+    await load();
+  };
+
+  const deleteMessage = async (messageId: number) => {
+    if (chatLocked) return;
+    const confirmed = window.confirm("Delete this message?");
+    if (!confirmed) return;
+    await apiRequest(`/api/supervisor/requests/${id}/messages/${messageId}`, { method: "DELETE" }, true);
+    await load();
+  };
+
   const review = async (action: "approve" | "reject") => {
     const comment = action === "reject"
       ? window.prompt("Enter the rejection reason for the requester:")
@@ -202,6 +227,19 @@ export default function RequestDetailPage({ id }: Props) {
         body: JSON.stringify({ action, comment: comment?.trim() || undefined }),
       }, true);
       await load();
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  const undoReview = async () => {
+    try {
+      setReviewing(true);
+      setAssignError(null);
+      await apiRequest(`/api/supervisor/requests/${id}/review/undo`, { method: "PATCH" }, true);
+      await load();
+    } catch (error) {
+      setAssignError(error instanceof Error ? error.message : "Failed to undo review.");
     } finally {
       setReviewing(false);
     }
@@ -250,7 +288,8 @@ export default function RequestDetailPage({ id }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           assigned_to: Number(selectedTechId),
-          scheduled_date: scheduledDate || null,
+          start_date: startDate || null,
+          finish_date: finishDate || null,
           scheduled_time: scheduledTime || null,
         }),
       }, true);
@@ -398,9 +437,55 @@ export default function RequestDetailPage({ id }: Props) {
                           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">{m.sender?.fname}</span>
                           <span className="text-[8px] font-bold text-slate-300">{new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${isMe ? "bg-[#003366] text-white rounded-tr-none" : "bg-white text-slate-700 border border-slate-100 rounded-tl-none"}`}>
-                          {m.message}
-                        </div>
+                        {editingId === m.id ? (
+                          <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+                            <textarea
+                              value={editingText}
+                              onChange={(e) => setEditingText(e.target.value)}
+                              className="w-full min-h-[72px] rounded-xl border border-slate-200 p-2 text-sm text-slate-800 outline-none"
+                            />
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => {
+                                  setEditingId(null);
+                                  setEditingText("");
+                                }}
+                                className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-black uppercase text-slate-600"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => void updateMessage(m.id)}
+                                className="rounded-lg bg-[#003366] px-2.5 py-1.5 text-[10px] font-black uppercase text-white"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${isMe ? "bg-[#003366] text-white rounded-tr-none" : "bg-white text-slate-700 border border-slate-100 rounded-tl-none"}`}>
+                            {m.message}
+                          </div>
+                        )}
+                        {isMe && editingId !== m.id && !chatLocked && (
+                          <div className="mt-2 flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => {
+                                setEditingId(m.id);
+                                setEditingText(m.message);
+                              }}
+                              className="rounded-lg bg-slate-100 p-1.5 text-slate-500 hover:bg-slate-200"
+                            >
+                              <Edit3 size={12} />
+                            </button>
+                            <button
+                              onClick={() => void deleteMessage(m.id)}
+                              className="rounded-lg bg-rose-50 p-1.5 text-rose-500 hover:bg-rose-100"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -452,14 +537,36 @@ export default function RequestDetailPage({ id }: Props) {
                   <HardHat size={14}/> Assign Technician
                 </button>
               )}
+              {isAssigned && ["assigned", "in_progress"].includes(detail.status) && (
+                <button onClick={openAssign} className="w-full bg-white text-[#003366] py-3 rounded-2xl text-[10px] font-black uppercase transition-all flex items-center justify-center gap-2 hover:bg-blue-50">
+                  <HardHat size={14}/> Reassign Technician
+                </button>
+              )}
+              {(detail.status === "approved" || detail.status === "rejected") && (
+                <button
+                  disabled={reviewing}
+                  onClick={undoReview}
+                  className="w-full bg-amber-500 hover:bg-amber-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all disabled:opacity-50"
+                >
+                  Undo Review
+                </button>
+              )}
               {detail.status === "completed" && (
-                <div className="grid grid-cols-2 gap-3">
-                  <button disabled={lifecycleBusy} onClick={() => updateLifecycle("close")} className="bg-emerald-500 hover:bg-emerald-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50">
-                    Close Request
-                  </button>
-                  <button disabled={lifecycleBusy} onClick={() => updateLifecycle("reopen")} className="bg-amber-500 hover:bg-amber-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-amber-900/30 disabled:opacity-50">
-                    Reopen Task
-                  </button>
+                <div className="space-y-3">
+                  <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-blue-200">Final Closure</p>
+                    <p className="mt-2 text-xs font-bold text-white/90">
+                      This request was completed by the technician and approved by the requester. Final close or reopen action is taken here by the supervisor.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button disabled={lifecycleBusy} onClick={() => updateLifecycle("close")} className="bg-emerald-500 hover:bg-emerald-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-emerald-900/40 disabled:opacity-50">
+                      Close Request
+                    </button>
+                    <button disabled={lifecycleBusy} onClick={() => updateLifecycle("reopen")} className="bg-amber-500 hover:bg-amber-600 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-lg shadow-amber-900/30 disabled:opacity-50">
+                      Reopen Task
+                    </button>
+                  </div>
                 </div>
               )}
               {isAssigned && (
@@ -634,9 +741,10 @@ export default function RequestDetailPage({ id }: Props) {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-                  <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
                 </div>
+                <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
               </>
             )}
 

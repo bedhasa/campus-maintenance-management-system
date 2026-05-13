@@ -9,6 +9,7 @@ use App\Models\RequestStatusLog;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Services\ActivityLogger;
+use App\Services\EmailNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -16,28 +17,43 @@ use Illuminate\Support\Facades\Storage;
 
 class MaintenanceRequestController extends RequesterController
 {
+    private const REQUEST_CANCELLED_MARKER = 'Request cancelled by requester before supervisor review.';
+
     public function dashboard(Request $request): JsonResponse
     {
         $user = $this->requester($request);
 
         $base = MaintenanceRequest::query()->where('requester_id', $user->id);
+        $cancelledCount = $this->countCancelledRequests(clone $base);
+        $rejectedCount = max(0, (clone $base)->where('status', 'rejected')->count() - $cancelledCount);
+        $recentRequests = MaintenanceRequest::query()
+            ->where('requester_id', $user->id)
+            ->with([
+                'category:id,name',
+                'building:id,name',
+                'room:id,name',
+                'statusLogs' => fn ($query) => $query->select(['id', 'request_id', 'new_status', 'comment', 'created_at'])->orderByDesc('created_at'),
+            ])
+            ->latest()
+            ->limit(5)
+            ->get();
+
+        $this->applyDisplayStatusCollection($recentRequests);
 
         return response()->json([
             'success' => true,
             'summary' => [
                 'total' => (clone $base)->count(),
                 'submitted' => (clone $base)->where('status', 'submitted')->count(),
-                'in_progress' => (clone $base)->whereIn('status', ['approved', 'assigned', 'in_progress'])->count(),
+                'approved' => (clone $base)->where('status', 'approved')->count(),
+                'assigned' => (clone $base)->where('status', 'assigned')->count(),
+                'in_progress' => (clone $base)->where('status', 'in_progress')->count(),
                 'completed' => (clone $base)->where('status', 'completed')->count(),
-                'rejected' => (clone $base)->where('status', 'rejected')->count(),
+                'rejected' => $rejectedCount,
                 'closed' => (clone $base)->where('status', 'closed')->count(),
+                'cancelled' => $cancelledCount,
             ],
-            'recent_requests' => MaintenanceRequest::query()
-                ->where('requester_id', $user->id)
-                ->with(['category:id,name', 'building:id,name', 'room:id,name'])
-                ->latest()
-                ->limit(5)
-                ->get(),
+            'recent_requests' => $recentRequests,
         ]);
     }
 
@@ -53,11 +69,34 @@ class MaintenanceRequestController extends RequesterController
 
         $query = MaintenanceRequest::query()
             ->where('requester_id', $user->id)
-            ->with(['category:id,name', 'building:id,name', 'room:id,name', 'asset:id,name'])
+            ->with([
+                'category:id,name',
+                'building:id,name',
+                'room:id,name',
+                'asset:id,name',
+                'statusLogs' => fn ($q) => $q->select(['id', 'request_id', 'new_status', 'comment', 'created_at'])->orderByDesc('created_at'),
+            ])
             ->latest();
 
         if (!empty($validated['status'])) {
-            $query->where('status', $validated['status']);
+            if ($validated['status'] === 'cancelled') {
+                $query->where(function ($q) {
+                    $q->where('status', 'cancelled')
+                        ->orWhere(function ($inner) {
+                            $inner->where('status', 'rejected')
+                                ->whereHas('statusLogs', fn ($logs) => $logs
+                                    ->where('new_status', 'rejected')
+                                    ->where('comment', 'like', self::REQUEST_CANCELLED_MARKER . '%'));
+                        });
+                });
+            } elseif ($validated['status'] === 'rejected') {
+                $query->where('status', 'rejected')
+                    ->whereDoesntHave('statusLogs', fn ($logs) => $logs
+                        ->where('new_status', 'rejected')
+                        ->where('comment', 'like', self::REQUEST_CANCELLED_MARKER . '%'));
+            } else {
+                $query->where('status', $validated['status']);
+            }
         }
         if (!empty($validated['priority'])) {
             $query->where('priority', $validated['priority']);
@@ -70,9 +109,12 @@ class MaintenanceRequestController extends RequesterController
             });
         }
 
+        $requests = $query->paginate(15);
+        $this->applyDisplayStatusCollection($requests->getCollection());
+
         return response()->json([
             'success' => true,
-            'requests' => $query->paginate(15),
+            'requests' => $requests,
         ]);
     }
 
@@ -121,6 +163,7 @@ class MaintenanceRequestController extends RequesterController
         if ($ticket->rating?->requester) {
             $ticket->rating->requester->setAttribute('profile_picture_url', $this->profilePictureUrl($ticket->rating->requester->profile_picture));
         }
+        $this->applyDisplayStatus($ticket);
 
         return response()->json([
             'success' => true,
@@ -165,18 +208,17 @@ class MaintenanceRequestController extends RequesterController
             'is_read' => false,
         ]);
 
-        User::query()
-            ->whereHas('roles', fn ($q) => $q->where('name', 'supervisor'))
-            ->get(['id'])
-            ->each(fn ($supervisor) => UserNotification::create([
-                'user_id' => $supervisor->id,
-                'recipient_role' => 'supervisor',
-                'type' => 'request_submitted',
-                'module' => 'request',
-                'related_id' => $ticket->id,
-                'message' => "A new maintenance request #{$this->requestCode($ticket->id)} requires your review.",
-                'is_read' => false,
-            ]));
+        $this->notifySupervisors(
+            'request_submitted',
+            $ticket->id,
+            "A new maintenance request #{$this->requestCode($ticket->id)} requires your review."
+        );
+
+        $this->notifySupervisors(
+            'chat_message',
+            $ticket->id,
+            "New requester message on request #{$this->requestCode($ticket->id)}."
+        );
 
         return response()->json([
             'success' => true,
@@ -194,7 +236,7 @@ class MaintenanceRequestController extends RequesterController
             return $this->forbidden();
         }
 
-        if (!in_array($ticket->status, ['submitted', 'rejected'], true)) {
+        if (!in_array($ticket->status, ['submitted', 'rejected', 'cancelled'], true)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Request cannot be edited in its current status.',
@@ -212,11 +254,75 @@ class MaintenanceRequestController extends RequesterController
             'priority' => ['sometimes', 'in:low,medium,high,urgent'],
         ]);
 
-        $ticket->update($validated);
+        $previousStatus = $ticket->status;
+        $isResubmission = in_array($previousStatus, ['rejected', 'cancelled'], true);
+
+        $updatePayload = $validated;
+        if ($isResubmission) {
+            $updatePayload['status'] = 'submitted';
+        }
+
+        $ticket->update($updatePayload);
+
+        if ($isResubmission) {
+            RequestStatusLog::create([
+                'request_id' => $ticket->id,
+                'changed_by' => $user->id,
+                'old_status' => $previousStatus,
+                'new_status' => 'submitted',
+                'comment' => 'Requester edited and resubmitted the request for supervisor review.',
+            ]);
+
+            $this->notifySupervisors(
+                'request_submitted',
+                $ticket->id,
+                "Request #{$this->requestCode($ticket->id)} has been updated and resubmitted for review."
+            );
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Request updated.',
+            'message' => $isResubmission ? 'Request updated and resubmitted.' : 'Request updated.',
+            'request' => $ticket->fresh()->load(['category:id,name', 'building:id,name', 'room:id,name']),
+        ]);
+    }
+
+    public function cancel(Request $request, int $id): JsonResponse
+    {
+        $user = $this->requester($request);
+        $ticket = MaintenanceRequest::findOrFail($id);
+
+        if ((int) $ticket->requester_id !== (int) $user->id) {
+            return $this->forbidden();
+        }
+
+        if ($ticket->status !== 'submitted') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only pending requests can be cancelled.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $oldStatus = $ticket->status;
+        $ticket->update(['status' => 'cancelled']);
+
+        RequestStatusLog::create([
+            'request_id' => $ticket->id,
+            'changed_by' => $user->id,
+            'old_status' => $oldStatus,
+            'new_status' => 'cancelled',
+            'comment' => trim((string) ($validated['comment'] ?? '')) ?: self::REQUEST_CANCELLED_MARKER,
+        ]);
+
+        ActivityLogger::log($user->id, 'request_lifecycle', 'cancel', $ticket->id, "Requester cancelled Request #{$ticket->id}.", $request);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Request cancelled.',
             'request' => $ticket->fresh()->load(['category:id,name', 'building:id,name', 'room:id,name']),
         ]);
     }
@@ -283,6 +389,12 @@ class MaintenanceRequestController extends RequesterController
         ]);
 
         ActivityLogger::log($user->id, 'chat', 'add_message', $message->id, "Message added on request #{$ticket->id}.", $request);
+
+        $this->notifySupervisors(
+            'chat_message',
+            $ticket->id,
+            "New requester message on request #{$this->requestCode($ticket->id)}."
+        );
 
         return response()->json([
             'success' => true,
@@ -437,39 +549,123 @@ class MaintenanceRequestController extends RequesterController
         $oldStatus = $ticket->status;
 
         if ($validated['action'] === 'accept') {
-            $ticket->update(['status' => 'closed']);
-
             RequestStatusLog::create([
                 'request_id' => $ticket->id,
                 'changed_by' => $user->id,
                 'old_status' => $oldStatus,
-                'new_status' => 'closed',
-                'comment' => 'Requester verified completion and closed request.',
+                'new_status' => 'completed',
+                'comment' => 'Requester approved the completed work. Supervisor closure is now pending.',
             ]);
 
             if ($latestWorkOrder?->assigned_to) {
                 $this->notifyUser(
                     (int) $latestWorkOrder->assigned_to,
                     'technician',
-                    'request_closed',
+                    'request_completion_approved',
                     $ticket->id,
-                    "Request #{$requestCode} has been accepted and closed by the requester."
+                    "Request #{$requestCode} was approved by the requester and is waiting for supervisor closure."
                 );
             }
 
             $this->notifySupervisors(
-                'request_closed',
+                'request_completion_approved',
                 $ticket->id,
-                "Request #{$requestCode} has been successfully closed."
+                "Request #{$requestCode} was approved by the requester and is ready for final closure."
             );
 
-            ActivityLogger::log($user->id, 'request_lifecycle', 'close', $ticket->id, "Requester closed Request #{$ticket->id}.", $request);
+            ActivityLogger::log($user->id, 'request_lifecycle', 'approve_completion', $ticket->id, "Requester approved completion for Request #{$ticket->id}.", $request);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Request accepted and closed.',
+                'message' => 'Request approved. Waiting for supervisor closure.',
             ]);
         }
+
+        return $this->reopenForRequester($ticket, $user, $comment, $request);
+    }
+
+    public function reopen(Request $request, int $id): JsonResponse
+    {
+        $user = $this->requester($request);
+        $ticket = MaintenanceRequest::query()->with('workOrders')->findOrFail($id);
+
+        if ((int) $ticket->requester_id !== (int) $user->id) {
+            return $this->forbidden();
+        }
+
+        if (!in_array($ticket->status, ['completed', 'closed'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only completed or closed requests can be reopened by the requester.',
+            ], 422);
+        }
+
+        $validated = $request->validate([
+            'comment' => ['required', 'string', 'max:1000'],
+        ]);
+
+        return $this->reopenForRequester($ticket, $user, trim($validated['comment']), $request);
+    }
+
+    private function profilePictureUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+        $url = Storage::disk('public')->url($path);
+        return str_starts_with($url, 'http') ? $url : url($url);
+    }
+
+    private function requestCode(int $id): string
+    {
+        return sprintf('REQ-%03d', $id);
+    }
+
+    private function countCancelledRequests($query): int
+    {
+        return (int) $query
+            ->where(function ($q) {
+                $q->where('status', 'cancelled')
+                    ->orWhere(function ($inner) {
+                        $inner->where('status', 'rejected')
+                            ->whereHas('statusLogs', fn ($logs) => $logs
+                                ->where('new_status', 'rejected')
+                                ->where('comment', 'like', self::REQUEST_CANCELLED_MARKER . '%'));
+                    });
+            })
+            ->count();
+    }
+
+    private function applyDisplayStatusCollection(iterable $requests): void
+    {
+        foreach ($requests as $request) {
+            if ($request instanceof MaintenanceRequest) {
+                $this->applyDisplayStatus($request);
+            }
+        }
+    }
+
+    private function applyDisplayStatus(MaintenanceRequest $request): void
+    {
+        $logs = $request->relationLoaded('statusLogs')
+            ? $request->statusLogs
+            : $request->statusLogs()->orderByDesc('created_at')->get(['id', 'request_id', 'new_status', 'comment', 'created_at']);
+
+        $cancelled = $request->status === 'cancelled'
+            || ($request->status === 'rejected'
+                && $logs->contains(fn ($log) => $log->new_status === 'rejected'
+                    && str_starts_with((string) ($log->comment ?? ''), self::REQUEST_CANCELLED_MARKER)));
+
+        if ($cancelled) {
+            $request->setAttribute('status', 'cancelled');
+        }
+    }
+
+    private function reopenForRequester(MaintenanceRequest $ticket, User $user, string $comment, Request $request): JsonResponse
+    {
+        $requestCode = $this->requestCode($ticket->id);
+        $latestWorkOrder = $ticket->workOrders()->latest('id')->first();
+        $oldStatus = $ticket->status;
 
         if ($latestWorkOrder) {
             $updates = [
@@ -512,26 +708,20 @@ class MaintenanceRequestController extends RequesterController
             "Request #{$requestCode} has been reopened."
         );
 
+        $this->notifyUser(
+            (int) $ticket->requester_id,
+            'requester',
+            'request_reopened',
+            $ticket->id,
+            "Your request #{$requestCode} has been reopened for additional maintenance work."
+        );
+
         ActivityLogger::log($user->id, 'request_lifecycle', 'reopen', $ticket->id, "Requester reopened Request #{$ticket->id}.", $request);
 
         return response()->json([
             'success' => true,
             'message' => 'Request reopened for additional work.',
         ]);
-    }
-
-    private function profilePictureUrl(?string $path): ?string
-    {
-        if (!$path) {
-            return null;
-        }
-        $url = Storage::disk('public')->url($path);
-        return str_starts_with($url, 'http') ? $url : url($url);
-    }
-
-    private function requestCode(int $id): string
-    {
-        return sprintf('REQ-%03d', $id);
     }
 
     private function notifySupervisors(string $type, int $relatedId, string $message): void
@@ -553,5 +743,8 @@ class MaintenanceRequestController extends RequesterController
             'message' => $message,
             'is_read' => false,
         ]);
+
+        $recipient = User::query()->find($userId);
+        EmailNotifier::sendToUser($recipient, 'CMMS Notification', $message);
     }
 }

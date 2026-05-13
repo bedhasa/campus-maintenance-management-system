@@ -1,7 +1,6 @@
 "use client";
-
-import CompletedPage from "../../../pages/Technician/CompletedPage";
+import HistoryPage from "../../../pages/Technician/HistoryPage";
 
 export default function RoutePage() {
-  return <CompletedPage />;
+  return <HistoryPage initialTab="completed" />;
 }

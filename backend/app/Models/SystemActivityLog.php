@@ -15,14 +15,17 @@ class SystemActivityLog extends Model
         'user_id',
         'module',
         'action',
+        'status',
         'reference_id',
         'description',
         'ip_address',
+        'meta',
         'created_at',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
+        'meta' => 'array',
     ];
 
     public function user()

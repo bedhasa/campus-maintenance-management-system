@@ -32,6 +32,7 @@ class AdminController extends ModuleController
         $this->authorizeRoles($request, ['admin', 'supervisor']);
         $validated = $request->validate([
             'search' => ['nullable', 'string', 'max:100'],
+            'role' => ['nullable', 'string', 'max:50'],
         ]);
 
         $query = User::query()->with(['roles:id,name', 'specialties:id,name']);
@@ -43,6 +44,11 @@ class AdminController extends ModuleController
                     ->orWhere('email', 'like', "%{$search}%")
                     ->orWhere('username', 'like', "%{$search}%");
             });
+        }
+
+        if (!empty($validated['role'])) {
+            $role = strtolower(trim((string) $validated['role']));
+            $query->whereHas('roles', fn ($q) => $q->whereRaw('LOWER(name) = ?', [$role]));
         }
 
         return response()->json([
@@ -86,7 +92,7 @@ class AdminController extends ModuleController
         $user->roles()->sync($validated['role_ids']);
         $user->specialties()->sync($validated['specialty_ids'] ?? []);
 
-        ActivityLogger::log($actor->id, 'user_management', 'create_user', $user->id, "Created user {$user->email}.", $request);
+        ActivityLogger::log($actor->id, 'user_management', 'create_user', 'success', $user->id, "Created user {$user->email}.", null, $request);
 
         return response()->json([
             'success' => true,
@@ -121,7 +127,7 @@ class AdminController extends ModuleController
             $user->specialties()->sync($validated['specialty_ids']);
         }
 
-        ActivityLogger::log($actor->id, 'user_management', 'update_user', $user->id, "Updated user {$user->email}.", $request);
+        ActivityLogger::log($actor->id, 'user_management', 'update_user', 'success', $user->id, "Updated user {$user->email}.", null, $request);
 
         return response()->json([
             'success' => true,
@@ -139,7 +145,7 @@ class AdminController extends ModuleController
         $user = User::query()->findOrFail($id);
         $user->update(['password' => Hash::make($validated['new_password'])]);
 
-        ActivityLogger::log($actor->id, 'user_management', 'reset_password', $user->id, "Reset password for {$user->email}.", $request);
+        ActivityLogger::log($actor->id, 'user_management', 'reset_password', 'success', $user->id, "Reset password for {$user->email}.", null, $request);
 
         return response()->json([
             'success' => true,
@@ -153,11 +159,16 @@ class AdminController extends ModuleController
         $validated = $request->validate([
             'user_id' => ['nullable', 'integer', 'exists:users,id'],
             'module' => ['nullable', 'string', 'max:100'],
+            'action' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'string', 'max:20'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
+            'export' => ['nullable', 'in:excel'],
         ]);
 
-        $query = \App\Models\SystemActivityLog::query()->with('user:id,fname,lname,email')->latest();
+        $query = \App\Models\SystemActivityLog::query()
+            ->with(['user:id,fname,lname,email', 'user.roles:id,name'])
+            ->latest();
 
         if (!empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
@@ -165,11 +176,57 @@ class AdminController extends ModuleController
         if (!empty($validated['module'])) {
             $query->where('module', $validated['module']);
         }
+        if (!empty($validated['action'])) {
+            $query->where('action', $validated['action']);
+        }
+        if (!empty($validated['status'])) {
+            $query->where('status', $validated['status']);
+        }
         if (!empty($validated['from'])) {
             $query->whereDate('created_at', '>=', $validated['from']);
         }
         if (!empty($validated['to'])) {
             $query->whereDate('created_at', '<=', $validated['to']);
+        }
+
+        if (($validated['export'] ?? null) === 'excel') {
+            $rows = $query->limit(5000)->get();
+            $delimiter = "\t";
+            $headers = [
+                'ID',
+                'DateTime',
+                'User',
+                'Roles',
+                'Module',
+                'Action',
+                'Status',
+                'ReferenceID',
+                'IP',
+                'Description',
+            ];
+            $lines = [implode($delimiter, $headers)];
+            foreach ($rows as $log) {
+                $userName = $log->user ? trim(($log->user->fname ?? '') . ' ' . ($log->user->lname ?? '')) : 'System';
+                $roles = $log->user ? $log->user->roles->pluck('name')->implode(', ') : '';
+                $lines[] = implode($delimiter, array_map(fn ($v) => str_replace(["\r", "\n", "\t"], ' ', (string) $v), [
+                    $log->id,
+                    optional($log->created_at)->toDateTimeString(),
+                    $userName,
+                    $roles,
+                    $log->module,
+                    $log->action,
+                    $log->status,
+                    $log->reference_id,
+                    $log->ip_address,
+                    $log->description,
+                ]));
+            }
+
+            $content = implode("\n", $lines);
+            return response($content, 200, [
+                'Content-Type' => 'application/vnd.ms-excel',
+                'Content-Disposition' => 'attachment; filename=system-logs.xls',
+            ]);
         }
 
         return response()->json([

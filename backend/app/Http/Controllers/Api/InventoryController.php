@@ -11,15 +11,62 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WorkOrder;
 use App\Services\ActivityLogger;
+use App\Services\EmailNotifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class InventoryController extends ModuleController
 {
+    private function hasSparePartImageColumn(): bool
+    {
+        return Schema::hasColumn('spare_parts', 'image_path');
+    }
+
+    private function sparePartColumns(bool $includePrice = false): array
+    {
+        $columns = ['id', 'name', 'part_code', 'quantity_available', 'minimum_stock'];
+
+        if ($includePrice) {
+            $columns[] = 'unit_price';
+        }
+
+        if ($this->hasSparePartImageColumn()) {
+            $columns[] = 'image_path';
+        }
+
+        return $columns;
+    }
+
+    private function partRelationSelect(): string
+    {
+        return 'part:' . implode(',', $this->sparePartColumns());
+    }
+
+    private function publicStorageUrl(?string $path): ?string
+    {
+        if (!$path) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($path);
+    }
+
+    private function withPartImageUrls($parts)
+    {
+        $parts->each(function ($part) {
+            $part->setAttribute('image_url', $this->publicStorageUrl($part->image_path));
+        });
+
+        return $parts;
+    }
+
     public function meta(Request $request): JsonResponse
     {
         $this->authorizeRoles($request, ['inventory_officer']);
@@ -32,7 +79,9 @@ class InventoryController extends ModuleController
                 ->limit(200)
                 ->get(['id', 'request_id', 'work_status', 'assigned_to', 'priority', 'created_at']),
             'technicians' => $this->techniciansQuery()->get(['id', 'fname', 'lname', 'phone']),
-            'spare_parts' => $this->sparePartsQuery()->get(['id', 'name', 'part_code', 'quantity_available', 'minimum_stock', 'unit_price']),
+            'spare_parts' => $this->withPartImageUrls(
+                $this->sparePartsQuery()->get($this->sparePartColumns(includePrice: true))
+            ),
         ]);
     }
 
@@ -46,6 +95,7 @@ class InventoryController extends ModuleController
                 'total_parts' => SparePart::query()->count(),
                 'categories' => Category::query()->count(),
                 'low_stock' => $this->lowStockQuery()->count(),
+                'total_inventory_value' => (float) SparePart::query()->selectRaw('COALESCE(SUM(quantity_available * unit_price), 0) as total')->value('total'),
                 'pending_requests' => PartRequest::query()->where('status', 'pending')->count(),
                 'approved_requests' => PartRequest::query()->where('status', 'approved')->count(),
                 'rejected_requests' => PartRequest::query()->where('status', 'rejected')->count(),
@@ -54,7 +104,7 @@ class InventoryController extends ModuleController
             'low_stock_parts' => $this->lowStockQuery()
                 ->orderBy('name')
                 ->limit(6)
-                ->get(['id', 'name', 'part_code', 'quantity_available', 'minimum_stock']),
+                ->get($this->sparePartColumns()),
             'recent_requests' => $this->requestsQuery()
                 ->latest('request_date')
                 ->limit(5)
@@ -72,9 +122,11 @@ class InventoryController extends ModuleController
 
         return response()->json([
             'success' => true,
-            'spare_parts' => $this->sparePartsQuery()
-                ->orderBy('name')
-                ->get(['id', 'name', 'part_code', 'quantity_available', 'minimum_stock', 'unit_price']),
+            'spare_parts' => $this->withPartImageUrls(
+                $this->sparePartsQuery()
+                    ->orderBy('name')
+                    ->get($this->sparePartColumns(includePrice: true))
+            ),
         ]);
     }
 
@@ -83,7 +135,12 @@ class InventoryController extends ModuleController
         $user = $this->authorizeRoles($request, ['inventory_officer']);
         $validated = $this->validateSparePartPayload($request);
 
+        if ($this->hasSparePartImageColumn() && $request->hasFile('image')) {
+            $validated['image_path'] = $request->file('image')->store('spare-part-images', 'public');
+        }
+
         $part = SparePart::create($validated);
+        $part->setAttribute('image_url', $this->publicStorageUrl($part->image_path ?? null));
 
         ActivityLogger::log(
             $user->id,
@@ -107,7 +164,16 @@ class InventoryController extends ModuleController
         $part = SparePart::query()->findOrFail($id);
         $validated = $this->validateSparePartPayload($request, $part);
 
+        if ($this->hasSparePartImageColumn() && $request->hasFile('image')) {
+            if (($part->image_path ?? null)) {
+                Storage::disk('public')->delete($part->image_path);
+            }
+            $validated['image_path'] = $request->file('image')->store('spare-part-images', 'public');
+        }
+
         $part->update($validated);
+        $freshPart = $part->fresh();
+        $freshPart?->setAttribute('image_url', $this->publicStorageUrl($freshPart->image_path ?? null));
 
         ActivityLogger::log(
             $user->id,
@@ -121,7 +187,7 @@ class InventoryController extends ModuleController
         return response()->json([
             'success' => true,
             'message' => 'Spare part updated successfully.',
-            'spare_part' => $part->fresh(),
+            'spare_part' => $freshPart,
         ]);
     }
 
@@ -131,9 +197,11 @@ class InventoryController extends ModuleController
 
         return response()->json([
             'success' => true,
-            'parts' => $this->lowStockQuery()
-                ->orderBy('name')
-                ->get(['id', 'name', 'part_code', 'quantity_available', 'minimum_stock', 'unit_price']),
+            'parts' => $this->withPartImageUrls(
+                $this->lowStockQuery()
+                    ->orderBy('name')
+                    ->get($this->sparePartColumns(includePrice: true))
+            ),
         ]);
     }
 
@@ -415,15 +483,32 @@ class InventoryController extends ModuleController
     {
         $this->authorizeRoles($request, ['inventory_officer']);
 
-        $mostIssuedParts = PartIssue::query()
+        $validated = $request->validate([
+            'range' => ['nullable', 'in:weekly,monthly,yearly,overall'],
+        ]);
+
+        $range = $validated['range'] ?? 'overall';
+        [$issueFrom, $requestFrom] = $this->resolveReportRange($range);
+
+        $issuesBase = PartIssue::query();
+        if ($issueFrom) {
+            $issuesBase->where('issue_date', '>=', $issueFrom);
+        }
+
+        $requestsBase = PartRequest::query();
+        if ($requestFrom) {
+            $requestsBase->where('request_date', '>=', $requestFrom);
+        }
+
+        $mostIssuedParts = (clone $issuesBase)
             ->select('part_id', DB::raw('SUM(quantity_issued) as total_quantity'), DB::raw('COUNT(*) as issue_count'), DB::raw('SUM(total_cost) as total_cost'))
-            ->with('part:id,name,part_code,quantity_available')
+            ->with($this->partRelationSelect())
             ->groupBy('part_id')
             ->orderByDesc('total_quantity')
             ->limit(10)
             ->get();
 
-        $technicianUsage = PartIssue::query()
+        $technicianUsage = (clone $issuesBase)
             ->select('technician_id', DB::raw('SUM(quantity_issued) as total_quantity'), DB::raw('SUM(total_cost) as total_cost'))
             ->with('technician:id,fname,lname')
             ->groupBy('technician_id')
@@ -431,7 +516,15 @@ class InventoryController extends ModuleController
             ->limit(10)
             ->get();
 
-        $workOrderUsage = PartIssue::query()
+        $mostRequestedTechnicians = (clone $requestsBase)
+            ->select('technician_id', DB::raw('SUM(quantity) as total_quantity'), DB::raw('COUNT(*) as request_count'))
+            ->with('technician:id,fname,lname')
+            ->groupBy('technician_id')
+            ->orderByDesc('total_quantity')
+            ->limit(10)
+            ->get();
+
+        $workOrderUsage = (clone $issuesBase)
             ->select('work_order_id', DB::raw('SUM(quantity_issued) as total_quantity'), DB::raw('SUM(total_cost) as total_cost'))
             ->with(['workOrder:id,request_id,created_at', 'workOrder.request:id,title,department_id'])
             ->groupBy('work_order_id')
@@ -439,13 +532,13 @@ class InventoryController extends ModuleController
             ->limit(20)
             ->get();
 
-        $monthlyConsumption = PartIssue::query()
+        $monthlyConsumption = (clone $issuesBase)
             ->selectRaw('YEAR(issue_date) as year, MONTH(issue_date) as month, SUM(quantity_issued) as total_quantity, SUM(total_cost) as total_cost')
             ->groupByRaw('YEAR(issue_date), MONTH(issue_date)')
             ->orderByRaw('YEAR(issue_date), MONTH(issue_date)')
             ->get();
 
-        $maintenanceCostByDepartment = PartIssue::query()
+        $maintenanceCostByDepartment = (clone $issuesBase)
             ->join('work_orders', 'part_issues.work_order_id', '=', 'work_orders.id')
             ->leftJoin('maintenance_requests', 'work_orders.request_id', '=', 'maintenance_requests.id')
             ->leftJoin('departments', 'maintenance_requests.department_id', '=', 'departments.id')
@@ -460,19 +553,34 @@ class InventoryController extends ModuleController
             ->orderByDesc('total_cost')
             ->get();
 
+        $lowStockReport = $this->withPartImageUrls(
+            $this->lowStockQuery()
+                ->orderBy('quantity_available')
+                ->get($this->sparePartColumns(includePrice: true))
+        );
+
+        $topPart = $mostIssuedParts->first();
+        $topTechnician = $mostRequestedTechnicians->first();
+
         return response()->json([
             'success' => true,
+            'range' => $range,
             'summary' => [
-                'total_requests' => PartRequest::query()->count(),
-                'pending_requests' => PartRequest::query()->where('status', 'pending')->count(),
-                'approved_requests' => PartRequest::query()->where('status', 'approved')->count(),
-                'rejected_requests' => PartRequest::query()->where('status', 'rejected')->count(),
-                'total_issues' => PartIssue::query()->count(),
-                'total_issue_cost' => (float) PartIssue::query()->sum('total_cost'),
+                'total_requests' => (clone $requestsBase)->count(),
+                'pending_requests' => (clone $requestsBase)->where('status', 'pending')->count(),
+                'approved_requests' => (clone $requestsBase)->where('status', 'approved')->count(),
+                'rejected_requests' => (clone $requestsBase)->where('status', 'rejected')->count(),
+                'total_issues' => (clone $issuesBase)->count(),
+                'total_issue_cost' => (float) (clone $issuesBase)->sum('total_cost'),
             ],
-            'most_requested_parts' => PartRequest::query()
+            'highlights' => [
+                'most_used_part' => $topPart,
+                'most_requested_technician' => $topTechnician,
+                'low_stock_count' => $lowStockReport->count(),
+            ],
+            'most_requested_parts' => (clone $requestsBase)
                 ->select('part_id', DB::raw('SUM(quantity) as total_quantity'), DB::raw('COUNT(*) as request_count'))
-                ->with('part:id,name,part_code,quantity_available')
+                ->with($this->partRelationSelect())
                 ->groupBy('part_id')
                 ->orderByDesc('total_quantity')
                 ->limit(10)
@@ -480,14 +588,13 @@ class InventoryController extends ModuleController
             'most_issued_parts' => $mostIssuedParts,
             'monthly_usage' => $monthlyConsumption,
             'technician_usage' => $technicianUsage,
+            'most_requested_technicians' => $mostRequestedTechnicians,
             // Added structured report blocks for supervisor-level consumption analytics.
             'most_used_parts' => $mostIssuedParts,
             'parts_usage_by_technician' => $technicianUsage,
             'parts_usage_by_work_order' => $workOrderUsage,
             'monthly_inventory_consumption' => $monthlyConsumption,
-            'low_stock_report' => $this->lowStockQuery()
-                ->orderBy('quantity_available')
-                ->get(['id', 'name', 'part_code', 'quantity_available', 'minimum_stock', 'unit_price']),
+            'low_stock_report' => $lowStockReport,
             'maintenance_cost_by_department' => $maintenanceCostByDepartment,
         ]);
     }
@@ -497,7 +604,7 @@ class InventoryController extends ModuleController
         return PartRequest::query()->with([
             'workOrder:id,request_id,priority,work_status,created_at',
             'technician:id,fname,lname,phone',
-            'part:id,name,part_code,quantity_available,minimum_stock',
+            $this->partRelationSelect(),
             'recorder:id,fname,lname',
             'reviewer:id,fname,lname',
             'issue.issuedBy:id,fname,lname',
@@ -512,7 +619,7 @@ class InventoryController extends ModuleController
             'workOrder:id,request_id,priority,work_status,created_at',
             'workOrder.request:id,title,status,department_id,created_at',
             'technician:id,fname,lname,phone',
-            'part:id,name,part_code,quantity_available,minimum_stock',
+            $this->partRelationSelect(),
             'issuedBy:id,fname,lname',
             'supervisor:id,fname,lname',
         ]);
@@ -598,7 +705,18 @@ class InventoryController extends ModuleController
             'unit_price' => ['required', 'numeric', 'min:0'],
             'quantity_available' => ['required', 'integer', 'min:0'],
             'minimum_stock' => ['nullable', 'integer', 'min:0'],
+            'image' => ['nullable', 'image', 'max:5120'],
         ]);
+    }
+
+    private function resolveReportRange(string $range): array
+    {
+        return match ($range) {
+            'weekly' => [now()->startOfWeek(), now()->startOfWeek()],
+            'monthly' => [now()->startOfMonth(), now()->startOfMonth()],
+            'yearly' => [now()->startOfYear(), now()->startOfYear()],
+            default => [null, null],
+        };
     }
 
     private function notifyTechnician(int $technicianId, string $type, string $message, string $module, int $relatedId): void
@@ -612,6 +730,9 @@ class InventoryController extends ModuleController
             'message' => $message,
             'is_read' => false,
         ]);
+
+        $technician = User::query()->find($technicianId);
+        EmailNotifier::sendToUser($technician, 'CMMS Notification', $message);
     }
 
     private function notifySupervisors(string $type, string $message, string $module, int $relatedId): void
@@ -630,6 +751,7 @@ class InventoryController extends ModuleController
                 'message' => $message,
                 'is_read' => false,
             ]);
+            EmailNotifier::sendToUser($supervisor, 'CMMS Notification', $message);
         }
     }
 
