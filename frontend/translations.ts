@@ -4,6 +4,7 @@ export const translations = {
     dashboard: "Dashboard",
     analytics: "Analytics",
     reportIssue: "Report Issue",
+    saveSettings: "Save Preferences",
     myHistory: "My History",
     allHistory: "All History",
     workOrders: "Work Orders",
