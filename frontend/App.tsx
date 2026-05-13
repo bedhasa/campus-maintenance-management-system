@@ -69,7 +69,7 @@ interface AppContextType {
   clearNotifications: () => void;
   language: Language;
   setLanguage: (lang: Language) => void;
-  t: (key: keyof typeof translations["en"]) => string;
+  t: (key: string) => string;
   viewedRequestId: string | null;
   setViewedRequestId: (id: string | null) => void;
 }
@@ -227,8 +227,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     localStorage.setItem("language", language);
   }, [language]);
 
-  const t = (key: keyof typeof translations["en"]) => {
-    return translations[language][key] || translations.en[key];
+  const t = (key: string) => {
+    return translations[language]?.[key] || translations.en[key] || key;
   };
 
   const login = (user: User) => {

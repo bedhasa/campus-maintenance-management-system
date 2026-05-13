@@ -174,7 +174,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
   };
 
   const openReassignModal = async () => {
-    const categoryId = data.request?.category_id;
+    const categoryId = data?.request?.category_id;
     if (!categoryId) {
       setError("Request category is missing; cannot load matched technicians.");
       return;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ShieldCheck, Loader2, Mail, RotateCcw, CheckCircle2, AlertCircle } from "lucide-react";
@@ -12,7 +12,7 @@ type VerifyOtpResponse = {
   expires_in?: number;
 };
 
-export default function VerifyOtpPage() {
+function VerifyOtpContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const emailFromQuery = searchParams?.get("email") ?? "";
@@ -206,5 +206,13 @@ export default function VerifyOtpPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function VerifyOtpPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50" />}>
+      <VerifyOtpContent />
+    </Suspense>
   );
 }
