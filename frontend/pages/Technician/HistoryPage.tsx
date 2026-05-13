@@ -14,7 +14,7 @@ import {
   getTaskLocation,
   getTaskTitle,
   getTechnicianLifecycleMeta,
-} from "./technician-utils";
+} from "@/lib/technician-utils";
 
 type Props = {
   initialTab?: "waiting_approval" | "completed";

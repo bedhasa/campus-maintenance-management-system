@@ -33,7 +33,7 @@ import {
   getPriorityTone,
   getTaskLocation,
   getTechnicianLifecycleMeta,
-} from "./technician-utils";
+} from "@/lib/technician-utils";
 
 type SparePartOption = {
   id: number;

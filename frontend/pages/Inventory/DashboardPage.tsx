@@ -12,7 +12,7 @@ import {
   requestStatusTone,
   urgencyTone,
   isLowStock,
-} from "./inventory-utils";
+} from "@/lib/inventory-utils";
 
 type DashboardResponse = {
   success: boolean;

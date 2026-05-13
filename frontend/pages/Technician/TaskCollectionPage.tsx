@@ -11,7 +11,7 @@ import {
   formatDate,
   getTaskLocation,
   getTaskTitle,
-} from "./technician-utils";
+} from "@/lib/technician-utils";
 
 export default function TaskCollectionPage({
   title,

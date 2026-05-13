@@ -6,7 +6,7 @@ import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
 import Image from "next/image";
 import { AlertTriangle, Edit2, ImagePlus, Plus, RefreshCw, Save, Search, X, Package } from "lucide-react";
-import { InventoryPart, InventoryPartFormValues, getInventoryImageUrl, isLowStock, stockTone } from "./inventory-utils";
+import { InventoryPart, InventoryPartFormValues, getInventoryImageUrl, isLowStock, stockTone } from "@/lib/inventory-utils";
 
 type PartsResponse = {
   success: boolean;

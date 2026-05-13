@@ -10,7 +10,7 @@ import {
   formatDateTime,
   requestStatusTone,
   urgencyTone,
-} from "./inventory-utils";
+} from "@/lib/inventory-utils";
 
 type RequestsResponse = {
   success: boolean;

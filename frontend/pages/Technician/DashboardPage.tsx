@@ -7,7 +7,7 @@ import { AlertTriangle, CheckCircle2, ClipboardList, Clock3, PlayCircle, Chevron
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
 import { useLiveRefresh } from "@/lib/use-live-refresh";
-import { TechnicianDashboardResponse, formatDate, getPriorityLabel, getPriorityTone, getStatusLabel, getStatusTone, getTaskLocation, getTaskTitle, TechnicianWorkOrder } from "./technician-utils";
+import { TechnicianDashboardResponse, formatDate, getPriorityLabel, getPriorityTone, getStatusLabel, getStatusTone, getTaskLocation, getTaskTitle, TechnicianWorkOrder } from "@/lib/technician-utils";
 
 export default function TechnicianDashboardPage() {
   const router = useRouter();

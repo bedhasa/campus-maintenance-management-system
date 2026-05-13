@@ -14,7 +14,7 @@ import {
   buildPersonName,
   isLowStock,
   requestStatusTone,
-} from "./inventory-utils";
+} from "@/lib/inventory-utils";
 
 type MetaResponse = {
   success: boolean;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
 import { ChevronDown, ChevronUp, History, Calendar, Package, Search, Wrench } from "lucide-react";
-import { PartIssueRecord, buildPersonName, formatDateTime } from "./inventory-utils";
+import { PartIssueRecord, buildPersonName, formatDateTime } from "@/lib/inventory-utils";
 
 type IssuesResponse = {
   success: boolean;

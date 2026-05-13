@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
 import { AlertTriangle } from "lucide-react";
-import { InventoryPart, isLowStock, stockTone } from "./inventory-utils";
+import { InventoryPart, isLowStock, stockTone } from "@/lib/inventory-utils";
 
 type LowStockResponse = {
   success: boolean;

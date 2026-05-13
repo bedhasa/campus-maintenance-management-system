@@ -5,7 +5,7 @@ import Image from "next/image";
 import { Download, Filter, Package, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import PageSkeleton from "@/components/PageSkeleton";
-import { buildPersonName, getInventoryImageUrl, InventoryPart } from "./inventory-utils";
+import { buildPersonName, getInventoryImageUrl, InventoryPart } from "@/lib/inventory-utils";
 
 type ReportRange = "weekly" | "monthly" | "yearly" | "overall";
 
