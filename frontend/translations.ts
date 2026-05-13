@@ -64,6 +64,7 @@ export const translations = {
   am: {
     dashboard: "ዳሽቦርድ",
     analytics: "ትንታኔ",
+    saveSettings: "ቅንብሮችን አስቀምጥ",
     reportIssue: "ችግር ሪፖርት ያድርጉ",
     myHistory: "የእኔ ታሪክ",
     allHistory: "ሙሉ ታሪክ",
