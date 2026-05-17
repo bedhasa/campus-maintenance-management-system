@@ -1,9 +1,10 @@
+import { buildApiUrl } from "@/lib/runtime-config";
+
 type ApiError = {
   message?: string;
   errors?: Record<string, string[]>;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 const REQUEST_TIMEOUT_MS = 15000;
 
 export function readAuthToken(): string | null {
@@ -95,7 +96,7 @@ export async function apiRequest<T>(
 
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(buildApiUrl(path), {
       ...options,
       signal: controller.signal,
       headers,

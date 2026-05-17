@@ -127,9 +127,8 @@ class EnterpriseModuleSeeder extends Seeder
         ], [
             'user_id' => $supervisor->id,
             'description' => 'Seeded enterprise module demo data.',
-            'ip_address' => '127.0.0.1',
+            'ip_address' => '192.0.2.1',
             'created_at' => now(),
         ]);
     }
 }
-

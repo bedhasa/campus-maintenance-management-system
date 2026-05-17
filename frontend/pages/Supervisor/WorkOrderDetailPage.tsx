@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
+import { buildStorageUrl } from "@/lib/runtime-config";
 import PageSkeleton from "@/components/PageSkeleton";
 import { 
   BookOpen, Clock, HardHat, AlertCircle, MapPin, 
@@ -95,9 +96,7 @@ const priorityMap: Record<string, string> = {
 };
 
 const getImageUrl = (path?: string | null) => {
-  if (!path) return "";
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return path.startsWith("http") ? path : `${baseUrl}/storage/${path.replace(/^\/+/, "")}`;
+  return buildStorageUrl(path);
 };
 
 function formatMoney(n: number | string | null | undefined): string {

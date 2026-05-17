@@ -1,4 +1,5 @@
 import { apiRequest } from "@/lib/api";
+import { buildApiUrl } from "@/lib/runtime-config";
 
 export type AnalyticsKpiKey = "total" | "approved" | "rejected" | "completed" | "overdue";
 export type AnalyticsPeriod = "today" | "weekly" | "monthly" | "quarterly" | "yearly" | "custom";
@@ -153,10 +154,9 @@ export async function fetchAnalytics(filters: AnalyticsFilters): Promise<Analyti
 
 export async function exportAnalytics(filters: AnalyticsFilters, format: "excel" | "pdf"): Promise<void> {
   const query = buildAnalyticsQuery(filters);
-  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   const token = typeof window !== "undefined" ? sessionStorage.getItem("auth_token") : null;
 
-  const response = await fetch(`${base}/api/analytics/export?${query}&export=${format}`, {
+  const response = await fetch(buildApiUrl(`/api/analytics/export?${query}&export=${format}`), {
     method: "GET",
     headers: {
       Accept: "application/json,text/csv,*/*",

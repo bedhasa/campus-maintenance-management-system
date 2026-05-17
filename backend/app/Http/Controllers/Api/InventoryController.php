@@ -55,7 +55,9 @@ class InventoryController extends ModuleController
             return null;
         }
 
-        return Storage::disk('public')->url($path);
+        $url = Storage::disk('public')->url($path);
+
+        return str_starts_with($url, 'http') ? $url : url($url);
     }
 
     private function withPartImageUrls($parts)

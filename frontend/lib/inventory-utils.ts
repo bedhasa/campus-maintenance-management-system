@@ -1,3 +1,5 @@
+import { buildStorageUrl } from "@/lib/runtime-config";
+
 export type InventoryPart = {
   id: number;
   name: string;
@@ -163,9 +165,5 @@ export const isLowStock = (quantity?: number, minimumStock?: number) => {
 export const getInventoryImageUrl = (part?: InventoryPart | null) => {
   if (!part) return "";
   if (part.image_url) return part.image_url;
-  if (!part.image_path) return "";
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return part.image_path.startsWith("http")
-    ? part.image_path
-    : `${baseUrl}/storage/${part.image_path.replace(/^\/+/, "")}`;
+  return buildStorageUrl(part.image_path);
 };

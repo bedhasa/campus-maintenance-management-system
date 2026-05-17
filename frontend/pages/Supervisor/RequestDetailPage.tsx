@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { apiRequest } from "@/lib/api";
+import { buildStorageUrl } from "@/lib/runtime-config";
 import { 
   X, ChevronLeft, ChevronRight, MapPin, Tag, Box, 
   Calendar, Clock, User, MessageSquare, Send, 
@@ -74,8 +75,6 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   const [reviewing, setReviewing] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
-  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
   // Logic Endpoints (Untouched as per instructions)
   const load = useCallback(async () => {
     const res = await apiRequest<{ success: boolean; request: RequestDetail }>(`/api/supervisor/requests/${id}`, { method: "GET" }, true);
@@ -173,8 +172,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   };
 
   const resolveImage = (path?: string | null) => {
-    if (!path) return "";
-    return path.startsWith("http") ? path : `${baseUrl}/storage/${path.replace(/^\/+/, "")}`;
+    return buildStorageUrl(path);
   };
 
   // Logic Actions

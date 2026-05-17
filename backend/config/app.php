@@ -52,7 +52,7 @@ return [
     |
     */
 
-    'url' => env('APP_URL', 'http://localhost'),
+    'url' => env('APP_URL', 'https://cozy-courage-production-5f59.up.railway.app'),
 
     /*
     |--------------------------------------------------------------------------

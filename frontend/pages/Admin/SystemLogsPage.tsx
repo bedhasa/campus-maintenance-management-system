@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest, readAuthToken } from "@/lib/api";
+import { buildApiUrl } from "@/lib/runtime-config";
 import { Download, Filter, Search, X } from "lucide-react";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 type Log = {
   id: number;
@@ -49,7 +48,7 @@ export default function SystemLogsPage() {
       if (opts?.exportExcel) {
         query.set("export", "excel");
         const token = readAuthToken();
-        const res = await fetch(`${API_BASE_URL}/api/admin/system-logs?${query.toString()}`, {
+        const res = await fetch(buildApiUrl(`/api/admin/system-logs?${query.toString()}`), {
           method: "GET",
           headers: {
             Accept: "application/vnd.ms-excel",
