@@ -26,6 +26,7 @@ type KpiData = {
 };
 
 export default function PMDashboardPage() {
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
   const [tasks, setTasks] = useState<PMTask[]>([]);
   const [kpi, setKpi] = useState<KpiData>({ upcoming: 0, dueToday: 0, overdue: 0, completed: 0 });
   const [selectedTask, setSelectedTask] = useState<PMTask | null>(null);
@@ -215,7 +216,7 @@ export default function PMDashboardPage() {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex gap-4 items-center">
                   {selectedTask.asset?.image_path ? (
-                    <img src={`http://127.0.0.1:8000/storage/${selectedTask.asset.image_path}`} alt={selectedTask.asset.name} className="w-16 h-16 rounded-xl object-cover bg-slate-200 border border-slate-200" />
+                    <img src={`${apiBaseUrl}/storage/${selectedTask.asset.image_path}`} alt={selectedTask.asset.name} className="w-16 h-16 rounded-xl object-cover bg-slate-200 border border-slate-200" />
                   ) : (
                     <div className="w-16 h-16 rounded-xl bg-slate-200 border border-slate-200 flex items-center justify-center text-slate-400">
                       <Camera size={24} />

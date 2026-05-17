@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiRequest, readAuthToken } from "@/lib/api";
 import { Download, Filter, Search, X } from "lucide-react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 type Log = {
   id: number;
@@ -305,4 +305,3 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

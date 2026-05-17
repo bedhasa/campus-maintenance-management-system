@@ -74,7 +74,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   const [reviewing, setReviewing] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
   // Logic Endpoints (Untouched as per instructions)
   const load = useCallback(async () => {

@@ -153,7 +153,7 @@ export async function fetchAnalytics(filters: AnalyticsFilters): Promise<Analyti
 
 export async function exportAnalytics(filters: AnalyticsFilters, format: "excel" | "pdf"): Promise<void> {
   const query = buildAnalyticsQuery(filters);
-  const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+  const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   const token = typeof window !== "undefined" ? sessionStorage.getItem("auth_token") : null;
 
   const response = await fetch(`${base}/api/analytics/export?${query}&export=${format}`, {

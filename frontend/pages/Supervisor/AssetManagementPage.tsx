@@ -68,6 +68,7 @@ interface AssetManagementPageProps {
 }
 
 export default function AssetManagementPage({ embedded = false }: AssetManagementPageProps) {
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
   const [sectionTab, setSectionTab] = useState<"registry" | "form">("registry");
   const [assets, setAssets] = useState<AssetRecord[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -525,7 +526,7 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
                     <div className="flex gap-6">
                       {selectedAsset.image_path && (
                         <div className="w-32 h-32 shrink-0">
-                          <img src={`http://127.0.0.1:8000/storage/${selectedAsset.image_path}`} alt={selectedAsset.name} className="w-full h-full object-cover rounded-2xl border border-slate-200 shadow-sm" />
+                          <img src={`${apiBaseUrl}/storage/${selectedAsset.image_path}`} alt={selectedAsset.name} className="w-full h-full object-cover rounded-2xl border border-slate-200 shadow-sm" />
                         </div>
                       )}
                       <div>

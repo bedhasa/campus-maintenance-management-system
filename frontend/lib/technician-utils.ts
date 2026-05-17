@@ -189,6 +189,6 @@ export const isDelayedTask = (task: TechnicianWorkOrder, nowMs?: number | null) 
 
 export const getImageUrl = (path?: string | null) => {
   if (!path) return "";
-  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
   return path.startsWith("http") ? path : `${baseUrl}/storage/${path.replace(/^\/+/, "")}`;
 };
