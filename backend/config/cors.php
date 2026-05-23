@@ -1,5 +1,18 @@
 <?php
 
+$configuredFrontendOrigins = array_values(array_filter(array_map(
+    static fn (string $value): ?string => ($value = trim($value)) !== '' ? rtrim($value, '/') : null,
+    explode(',', (string) env('FRONTEND_URLS', 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001'))
+)));
+
+if ($configuredFrontendOrigins === []) {
+    $fallbackOrigin = trim((string) env('FRONTEND_URL', 'http://localhost:3000'));
+
+    if ($fallbackOrigin !== '') {
+        $configuredFrontendOrigins[] = rtrim($fallbackOrigin, '/');
+    }
+}
+
 return [
 
     /*
@@ -15,11 +28,11 @@ return [
     |
     */
 
-    'paths' => ['*'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [env('FRONTEND_URL')],
+    'allowed_origins' => $configuredFrontendOrigins,
 
     'allowed_origins_patterns' => [],
 

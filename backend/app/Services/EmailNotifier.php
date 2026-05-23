@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Mail\UserNotificationMail;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -15,9 +16,7 @@ class EmailNotifier
         }
 
         try {
-            Mail::raw($message, function ($mail) use ($user, $subject) {
-                $mail->to($user->email)->subject($subject);
-            });
+            Mail::to($user->email)->send(new UserNotificationMail($user, $subject, $message));
         } catch (\Throwable $exception) {
             Log::warning('Email notification send failed', [
                 'user_id' => $user->id,
@@ -28,4 +27,3 @@ class EmailNotifier
         }
     }
 }
-

@@ -11,7 +11,6 @@ use App\Models\User;
 use App\Models\UserNotification;
 use App\Models\WorkOrder;
 use App\Services\ActivityLogger;
-use App\Services\EmailNotifier;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -734,7 +733,6 @@ class InventoryController extends ModuleController
         ]);
 
         $technician = User::query()->find($technicianId);
-        EmailNotifier::sendToUser($technician, 'CMMS Notification', $message);
     }
 
     private function notifySupervisors(string $type, string $message, string $module, int $relatedId): void
@@ -753,7 +751,6 @@ class InventoryController extends ModuleController
                 'message' => $message,
                 'is_read' => false,
             ]);
-            EmailNotifier::sendToUser($supervisor, 'CMMS Notification', $message);
         }
     }
 

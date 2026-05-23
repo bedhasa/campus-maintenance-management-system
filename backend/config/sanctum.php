@@ -2,6 +2,39 @@
 
 use Laravel\Sanctum\Sanctum;
 
+$extractHostWithPort = static function (?string $value): ?string {
+    $value = trim((string) $value);
+
+    if ($value === '') {
+        return null;
+    }
+
+    $host = parse_url($value, PHP_URL_HOST);
+    $port = parse_url($value, PHP_URL_PORT);
+
+    if ($host !== null && $host !== false) {
+        return $port ? "{$host}:{$port}" : $host;
+    }
+
+    return $value;
+};
+
+$frontendUrls = array_filter(array_map(
+    static fn (string $value): string => trim($value),
+    explode(',', (string) env('FRONTEND_URLS', 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001'))
+));
+
+$configuredStatefulDomains = array_filter(array_map(
+    static fn (string $value): string => trim($value),
+    explode(',', (string) env('SANCTUM_STATEFUL_DOMAINS', ''))
+));
+
+$defaultStatefulDomains = array_filter([
+    Sanctum::currentApplicationUrlWithPort(),
+    $extractHostWithPort((string) env('APP_URL')),
+    ...array_map($extractHostWithPort, $frontendUrls),
+]);
+
 return [
 
     /*
@@ -15,11 +48,10 @@ return [
     |
     */
 
-    'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', implode(',', array_filter([
-        Sanctum::currentApplicationUrlWithPort(),
-        parse_url((string) env('APP_URL'), PHP_URL_HOST),
-        parse_url((string) env('FRONTEND_URL'), PHP_URL_HOST),
-    ])))),
+    'stateful' => array_values(array_unique([
+        ...$configuredStatefulDomains,
+        ...$defaultStatefulDomains,
+    ])),
 
     /*
     |--------------------------------------------------------------------------

@@ -16,7 +16,6 @@ use App\Models\WorkOrder;
 use App\Models\WorkOrderSparePart;
 use App\Models\WorkOrderStatusLog;
 use App\Services\ActivityLogger;
-use App\Services\EmailNotifier;
 use App\Support\SimilarCompletionCases;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -817,8 +816,6 @@ class TechnicianController extends ModuleController
         }
 
         UserNotification::create($payload);
-        $recipient = User::query()->find($userId);
-        EmailNotifier::sendToUser($recipient, 'CMMS Notification', $message);
     }
 
     private function requestCode(int $id): string

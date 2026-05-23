@@ -19,7 +19,6 @@ use App\Models\WorkOrder;
 use App\Models\WorkOrderSparePart;
 use App\Models\WorkOrderStatusLog;
 use App\Services\ActivityLogger;
-use App\Services\EmailNotifier;
 use App\Support\SlaResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -2247,8 +2246,6 @@ class SupervisorController extends ModuleController
             'is_read' => false,
         ]);
 
-        $requester = User::query()->find($ticket->requester_id);
-        EmailNotifier::sendToUser($requester, 'CMMS Notification', $message);
     }
 
     private function notifyTechnician(int $technicianId, string $type, string $message, int $relatedId, string $module = 'work_order'): void
@@ -2263,7 +2260,5 @@ class SupervisorController extends ModuleController
             'is_read' => false,
         ]);
 
-        $technician = User::query()->find($technicianId);
-        EmailNotifier::sendToUser($technician, 'CMMS Notification', $message);
     }
 }

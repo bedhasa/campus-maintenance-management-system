@@ -52,7 +52,20 @@ return [
     |
     */
 
-    'url' => env('APP_URL', 'https://cozy-courage-production-5f59.up.railway.app'),
+    'url' => env('APP_URL', 'http://127.0.0.1:8000'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | This URL is used when generating links that should send the user back
+    | to the SPA frontend, such as password reset and email verification
+    | redirects.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
 
     /*
     |--------------------------------------------------------------------------

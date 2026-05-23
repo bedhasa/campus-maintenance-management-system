@@ -10,35 +10,35 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class OtpVerificationMail extends Mailable
+class UserNotificationMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public function __construct(
-        public string $otp,
-        public User $user
+        public User $user,
+        public string $subjectLine,
+        public string $messageBody,
     ) {
     }
 
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Your OTP Verification Code',
+            subject: $this->subjectLine,
         );
     }
 
     public function content(): Content
     {
         return new Content(
-            view: 'emails.otp-verification',
+            view: 'emails.user-notification',
             with: [
-                'otp' => $this->otp,
                 'user' => $this->user,
                 'displayName' => $this->user->display_name,
+                'messageBody' => $this->messageBody,
                 'appName' => (string) config('app.name', 'CMMS'),
                 'systemUrl' => FrontendUrl::base(),
                 'loginUrl' => FrontendUrl::login(),
-                'verifyUrl' => FrontendUrl::verifyOtp((string) $this->user->email),
             ],
         );
     }

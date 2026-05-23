@@ -2,7 +2,13 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, set `NEXT_PUBLIC_API_URL` in your environment, then run the development server:
+Create `frontend/.env.local` or use `frontend/.env.development` with:
+
+```bash
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+Then run the development server:
 
 ```bash
 npm run dev
@@ -14,7 +20,7 @@ pnpm dev
 bun dev
 ```
 
-Open the frontend URL reported by Next.js in your terminal to see the result.
+Open the frontend URL reported by Next.js in your terminal to see the result. The API requests will target the backend URL from `NEXT_PUBLIC_API_URL`.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

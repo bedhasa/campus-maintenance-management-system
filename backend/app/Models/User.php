@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use App\Notifications\ResetPasswordNotification;
+use App\Notifications\VerifyEmailNotification;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -39,6 +41,35 @@ class User extends Authenticatable
         'is_verified' => 'boolean',
         'otp_expires_at' => 'datetime',
     ];
+
+    protected $appends = [
+        'display_name',
+    ];
+
+    public function getDisplayNameAttribute(): string
+    {
+        $name = preg_replace('/\s+/', ' ', trim(($this->fname ?? '').' '.($this->lname ?? '')));
+
+        if (!empty($name)) {
+            return $name;
+        }
+
+        if (!empty($this->username)) {
+            return trim((string) $this->username);
+        }
+
+        return trim((string) $this->email);
+    }
+
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new ResetPasswordNotification($token));
+    }
+
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->notify(new VerifyEmailNotification());
+    }
 
     // Relationship: User belongs to Department
     public function department()

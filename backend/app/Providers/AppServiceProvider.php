@@ -3,10 +3,13 @@
 namespace App\Providers;
 
 use App\Models\MaintenanceRequest;
+use App\Models\UserNotification;
 use App\Models\WorkOrder;
+use App\Observers\UserNotificationObserver;
 use App\Policies\MaintenanceRequestPolicy;
 use App\Policies\UserManagementPolicy;
 use App\Policies\WorkOrderPolicy;
+use App\Support\FrontendUrl;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -29,11 +32,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(MaintenanceRequest::class, MaintenanceRequestPolicy::class);
         Gate::policy(WorkOrder::class, WorkOrderPolicy::class);
         Gate::define('manage-users', [UserManagementPolicy::class, 'manage']);
+        UserNotification::observe(UserNotificationObserver::class);
 
         ResetPassword::createUrlUsing(function (object $notifiable, string $token) {
-            $encodedToken = rawurlencode($token);
-            $encodedEmail = rawurlencode($notifiable->getEmailForPasswordReset());
-            return config('app.frontend_url')."/reset-password?token={$encodedToken}&email={$encodedEmail}";
+            return FrontendUrl::resetPassword($token, $notifiable->getEmailForPasswordReset());
         });
     }
 }

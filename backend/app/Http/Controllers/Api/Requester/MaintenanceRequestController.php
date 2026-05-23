@@ -9,7 +9,6 @@ use App\Models\RequestStatusLog;
 use App\Models\User;
 use App\Models\UserNotification;
 use App\Services\ActivityLogger;
-use App\Services\EmailNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
@@ -744,7 +743,5 @@ class MaintenanceRequestController extends RequesterController
             'is_read' => false,
         ]);
 
-        $recipient = User::query()->find($userId);
-        EmailNotifier::sendToUser($recipient, 'CMMS Notification', $message);
     }
 }
