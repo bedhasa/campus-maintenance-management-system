@@ -213,12 +213,6 @@ class MaintenanceRequestController extends RequesterController
             "A new maintenance request #{$this->requestCode($ticket->id)} requires your review."
         );
 
-        $this->notifySupervisors(
-            'chat_message',
-            $ticket->id,
-            "New requester message on request #{$this->requestCode($ticket->id)}."
-        );
-
         return response()->json([
             'success' => true,
             'message' => 'Maintenance request submitted.',
@@ -725,10 +719,30 @@ class MaintenanceRequestController extends RequesterController
 
     private function notifySupervisors(string $type, int $relatedId, string $message): void
     {
-        User::query()
+        $supervisorIds = User::query()
             ->whereHas('roles', fn ($q) => $q->where('name', 'supervisor'))
-            ->get(['id'])
-            ->each(fn ($supervisor) => $this->notifyUser((int) $supervisor->id, 'supervisor', $type, $relatedId, $message));
+            ->pluck('id');
+
+        if ($supervisorIds->isEmpty()) {
+            return;
+        }
+
+        $now = now();
+        UserNotification::insert(
+            $supervisorIds
+                ->map(fn ($id) => [
+                    'user_id' => (int) $id,
+                    'recipient_role' => 'supervisor',
+                    'type' => $type,
+                    'module' => 'request',
+                    'related_id' => $relatedId,
+                    'message' => $message,
+                    'is_read' => false,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ])
+                ->all()
+        );
     }
 
     private function notifyUser(int $userId, string $recipientRole, string $type, int $relatedId, string $message): void

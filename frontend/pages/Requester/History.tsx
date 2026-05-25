@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Search, Filter, ChevronRight, FilterX, History, Calendar, Hash } from 'lucide-react';
 import StatusBadge from '../../components/StatusBadge';
 import { MaintenanceRequest, TicketStatus, Priority } from '../../types';
 import { apiRequest } from '../../lib/api';
 import RequestDetailModal from '../../components/RequestDetailModal';
-import { TableRowsSkeleton } from '../../components/PageSkeleton';
+import { ListSkeleton, TableRowsSkeleton } from '../../components/PageSkeleton';
+import { useLiveRefresh } from '../../lib/use-live-refresh';
 
 // ... (Types and Mappers stay the same as your logic)
 type ApiRequestItem = {
@@ -68,25 +69,34 @@ const RequesterHistory: React.FC = () => {
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
   const selectedRequest = activeRequestId !== null ? items.find((req) => req.id === activeRequestId) : undefined;
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams();
-        if (searchTerm.trim()) params.set('search', searchTerm.trim());
-        if (statusFilter !== 'all') params.set('status', statusFilter);
-        const data = await apiRequest<PaginatedResponse>(`/api/requester/requests?${params.toString()}`, { method: 'GET' }, true);
-        setItems(data.requests?.data ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load history.');
-      } finally {
-        setLoading(false);
-      }
-    };
-    const handle = setTimeout(load, 300);
-    return () => clearTimeout(handle);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      if (searchTerm.trim()) params.set('search', searchTerm.trim());
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      const data = await apiRequest<PaginatedResponse>(`/api/requester/requests?${params.toString()}`, { method: 'GET' }, true);
+      setItems(data.requests?.data ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load history.');
+    } finally {
+      setLoading(false);
+    }
   }, [searchTerm, statusFilter]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      void load();
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [load]);
+
+  useLiveRefresh(load, {
+    enabled: true,
+    topics: ['requester.requests', 'requests'],
+    refreshOnFocus: false,
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 pb-32 pt-6 space-y-8 animate-in fade-in duration-700">
@@ -144,7 +154,29 @@ const RequesterHistory: React.FC = () => {
       {/* 2. Content Area */}
       <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
         {loading ? (
-          <div className="p-8"><TableRowsSkeleton rows={5} /></div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left hidden md:table">
+              <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] border-b border-slate-100">
+                <tr>
+                  <th className="px-8 py-5">Request Info</th>
+                  <th className="px-8 py-5">Priority</th>
+                  <th className="px-8 py-5">Status</th>
+                  <th className="px-8 py-5">Submitted Date</th>
+                  <th className="px-8 py-5 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                <TableRowsSkeleton rows={5} />
+              </tbody>
+            </table>
+
+            <div className="p-6 md:hidden">
+              <ListSkeleton
+                rows={4}
+                className="space-y-4"
+              />
+            </div>
+          </div>
         ) : error ? (
           <div className="p-20 text-center text-rose-500 font-bold">{error}</div>
         ) : items.length > 0 ? (
@@ -233,7 +265,7 @@ const RequesterHistory: React.FC = () => {
               <History size={48} strokeWidth={1} />
             </div>
             <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">No Records Found</h3>
-            <p className="text-sm text-slate-500 mt-2 font-medium">We couldn't find any requests matching your criteria.</p>
+            <p className="text-sm text-slate-500 mt-2 font-medium">We couldn&apos;t find any requests matching your criteria.</p>
           </div>
         )}
       </div>

@@ -1,17 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../../App';
 import { useNavigate } from '../../lib/router-dom-shim';
 import { MaintenanceRequest, Priority, TicketStatus } from '../../types';
 import { 
   ClipboardList, Clock, 
   CheckCircle2, FileText,
-  AlertCircle, ChevronRight,
+  ChevronRight,
   LayoutDashboard, ThumbsUp, XCircle,
   ArrowRightCircle
 } from 'lucide-react';
 import { apiRequest } from '../../lib/api';
 import RequestDetailModal from '../../components/RequestDetailModal';
 import { ListSkeleton } from '../../components/PageSkeleton';
+import { useLiveRefresh } from '../../lib/use-live-refresh';
 
 // ... (Types and Helper functions stay exactly as you had them)
 type ApiRequestItem = {
@@ -71,22 +72,29 @@ const TrackingPage: React.FC = () => {
   const [recentRequests, setRecentRequests] = useState<ApiRequestItem[]>([]);
   const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const data = await apiRequest<DashboardResponse>('/api/requester/dashboard', { method: 'GET' }, true);
-        setSummary(data.summary);
-        setRecentRequests(data.recent_requests ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Connection failed');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    loadDashboard();
+  const loadDashboard = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await apiRequest<DashboardResponse>('/api/requester/dashboard', { method: 'GET' }, true);
+      setSummary(data.summary);
+      setRecentRequests(data.recent_requests ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connection failed');
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  useLiveRefresh(loadDashboard, {
+    enabled: true,
+    topics: ['requester.dashboard', 'requester.requests', 'requests'],
+    refreshOnFocus: false,
+  });
 
   // NEW KPI CARD LOGIC
   const stats = useMemo(() => ([
@@ -108,7 +116,7 @@ const TrackingPage: React.FC = () => {
     return {
   id: String(request.id),
   title: request.title,
-  requesterId: String((currentUser as any)?.id ?? ''),
+  requesterId: String(currentUser?.id ?? ''),
   requesterName: firstName,
   department: currentUser?.department || 'Department',
   location: 'Campus Site',
@@ -135,7 +143,7 @@ const TrackingPage: React.FC = () => {
           </p>
         </div>
         <button 
-          onClick={() => navigate('/requester/new')}
+          onClick={() => navigate('/requester/submit')}
           className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-blue-200 active:scale-95"
         >
           <ArrowRightCircle size={18} />

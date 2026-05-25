@@ -463,7 +463,9 @@ class SupervisorController extends ModuleController
             'assigned_to' => ['required', 'integer', 'exists:users,id'],
             'start_date' => ['nullable', 'date'],
             'finish_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+            'due_date' => ['nullable', 'date'],
             'scheduled_time' => ['nullable', 'date_format:H:i'],
+            'priority' => ['nullable', 'in:low,medium,high,urgent'],
         ]);
 
         $technician = User::query()
@@ -484,6 +486,7 @@ class SupervisorController extends ModuleController
 
         $workOrder->update([
             'assigned_to' => $newAssigneeId,
+            'priority' => $validated['priority'] ?? $workOrder->priority,
             'scheduled_date' => $startDate,
             'scheduled_time' => $validated['scheduled_time'] ?? $workOrder->scheduled_time,
             'work_status' => 'assigned',
@@ -494,7 +497,8 @@ class SupervisorController extends ModuleController
             $oldStatus = $requestTicket->status;
             $requestTicket->update([
                 'status' => 'assigned',
-                'due_date' => $finishDate ?? $requestTicket->due_date,
+                'priority' => $validated['priority'] ?? $requestTicket->priority,
+                'due_date' => $validated['due_date'] ?? $finishDate ?? $requestTicket->due_date,
             ]);
 
             RequestStatusLog::create([
@@ -827,6 +831,7 @@ class SupervisorController extends ModuleController
             'assigned_to' => ['required', 'integer', 'exists:users,id'],
             'start_date' => ['nullable', 'date'],
             'finish_date' => ['nullable', 'date', 'after_or_equal:start_date'],
+            'due_date' => ['nullable', 'date'],
             'scheduled_date' => ['nullable', 'date'],
             'scheduled_time' => ['nullable', 'date_format:H:i'],
             'estimated_hours' => ['nullable', 'numeric', 'min:0.25'],
@@ -858,13 +863,14 @@ class SupervisorController extends ModuleController
         $isReassignment = $previousAssigneeId !== null && $previousAssigneeId !== $targetAssigneeId;
         $startDate = $validated['start_date'] ?? $validated['scheduled_date'] ?? null;
         $finishDate = $validated['finish_date'] ?? null;
+        $priority = $validated['priority'] ?? $ticket->priority;
 
         $workOrder = WorkOrder::query()->updateOrCreate(
             ['request_id' => $ticket->id],
             [
                 'created_by' => $user->id,
                 'assigned_to' => $targetAssigneeId,
-                'priority' => $validated['priority'] ?? $ticket->priority,
+                'priority' => $priority,
                 'scheduled_date' => $startDate,
                 'scheduled_time' => $validated['scheduled_time'] ?? null,
                 'estimated_hours' => $validated['estimated_hours'] ?? null,
@@ -875,7 +881,8 @@ class SupervisorController extends ModuleController
         $oldStatus = $ticket->status;
         $ticket->update([
             'status' => 'assigned',
-            'due_date' => $finishDate ?? $ticket->due_date,
+            'priority' => $priority,
+            'due_date' => $validated['due_date'] ?? $finishDate ?? $ticket->due_date,
         ]);
 
         RequestStatusLog::create([

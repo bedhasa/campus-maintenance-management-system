@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, createContext, useContext } from "react";
+import React, { useCallback, useEffect, useState, createContext, useContext } from "react";
 import {
   User,
   UserRole,
@@ -17,7 +17,7 @@ import {
   MOCK_INVENTORY_REQUESTS,
 } from "./constants";
 import { translations, Language } from "./translations";
-import { normalizeUserRole } from "./lib/role-routes";
+import { normalizeUserRole, normalizeUserRoles } from "./lib/role-routes";
 import { clearAuth, readAuthToken, readAuthUser } from "./lib/api";
 
 export interface Notification {
@@ -89,17 +89,25 @@ interface AppProviderProps {
 const mapStoredUser = (raw: unknown): User | null => {
   if (!raw || typeof raw !== "object") return null;
   const source = raw as Record<string, unknown>;
-
-  const normalizedRole = normalizeUserRole(
-    (source.role as string | undefined) ??
-      (source.active_role as string | undefined) ??
-      ((source.roles as Array<{ name?: string }> | undefined)?.[0]?.name ?? undefined),
-  );
-
   const rawRoles = source.roles as Array<{ name?: string }> | undefined;
   const roleNames = Array.isArray(rawRoles)
     ? rawRoles.map((r) => (r?.name ?? "").toString().toLowerCase()).filter(Boolean)
     : [];
+  const hasExplicitActiveRole =
+    typeof source.role === "string" ||
+    typeof source.active_role === "string";
+
+  // Users with a role-selection token should stay out of role-protected layouts
+  // until they explicitly choose a role.
+  if (!hasExplicitActiveRole && roleNames.length > 1) {
+    return null;
+  }
+
+  const normalizedRole = normalizeUserRole(
+    (source.role as string | undefined) ??
+      (source.active_role as string | undefined) ??
+      (rawRoles?.[0]?.name ?? undefined),
+  );
 
   if (!normalizedRole) return null;
 
@@ -224,6 +232,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
     localStorage.setItem("language", language);
   }, [language]);
 
@@ -231,15 +240,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     return translations[language]?.[key] || translations.en[key] || key;
   };
 
-  const login = (user: User) => {
+  const login = useCallback((user: User) => {
     setCurrentUser(user);
     localStorage.setItem("user", JSON.stringify(user));
-  };
+  }, []);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setCurrentUser(null);
     clearAuth();
-  };
+  }, []);
 
   const addNotification = (
     title: string,
@@ -381,10 +390,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   };
 
   const markNotificationsRead = () => {
+    const accessibleRoles = new Set(
+      normalizeUserRoles([currentUser?.role, ...(currentUser?.roles ?? [])]),
+    );
+
     setNotifications((prev) =>
       prev.map((n) => {
         const isRelevant = (n.recipientId ? n.recipientId === currentUser?.id : true) &&
-          (n.recipientRole ? n.recipientRole === currentUser?.role : true);
+          (n.recipientRole ? accessibleRoles.has(n.recipientRole) : true);
         return isRelevant ? { ...n, read: true } : n;
       }),
     );
@@ -395,11 +408,15 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   };
 
   const clearNotifications = () => {
+    const accessibleRoles = new Set(
+      normalizeUserRoles([currentUser?.role, ...(currentUser?.roles ?? [])]),
+    );
+
     setNotifications((prev) =>
       prev.filter(
         (n) =>
           (n.recipientId ? n.recipientId !== currentUser?.id : false) ||
-          (n.recipientRole ? n.recipientRole !== currentUser?.role : false),
+          (n.recipientRole ? !accessibleRoles.has(n.recipientRole) : false),
       ),
     );
   };

@@ -15,6 +15,7 @@ import { useApp } from '@/context/AppContext';
 import { apiRequest } from '@/lib/api';
 import { useLiveRefresh } from '@/lib/use-live-refresh';
 import { useNavigate } from '@/lib/router-dom-shim';
+import { buildRequestRealtimeTopics, emitRealtimeTopics } from '@/lib/realtime';
 
 interface RequestDetailModalProps {
   request: MaintenanceRequest;
@@ -371,7 +372,15 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     void loadRequestDetail();
   }, [loadRequestDetail]);
 
-  useLiveRefresh(() => loadRequestDetail(true), { enabled: Boolean(endpointRequestId), intervalMs: 7000 });
+  const realtimeTopics = useMemo(() => {
+    return buildRequestRealtimeTopics(endpointRequestId);
+  }, [endpointRequestId]);
+
+  useLiveRefresh(() => loadRequestDetail(true), {
+    enabled: Boolean(endpointRequestId),
+    topics: realtimeTopics,
+    refreshOnFocus: false,
+  });
 
   useEffect(() => {
     if (view === 'chat') {
@@ -408,6 +417,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         },
         true
       );
+      emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+        requestId: endpointRequestId,
+        action: 'message.created',
+      });
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
@@ -456,6 +469,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
           },
           true
         );
+        emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+          requestId: endpointRequestId,
+          action: 'message.updated',
+        });
         const data = await apiRequest<RequestDetailResponse>(
           `/api/requester/requests/${endpointRequestId}`,
           { method: 'GET' },
@@ -497,6 +514,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
           { method: 'DELETE' },
           true
         );
+        emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+          requestId: endpointRequestId,
+          action: 'message.deleted',
+        });
         const data = await apiRequest<RequestDetailResponse>(
           `/api/requester/requests/${endpointRequestId}`,
           { method: 'GET' },
@@ -536,6 +557,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         true
       );
       setSuccessMessage(response.message || 'Feedback submitted.');
+      emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+        requestId: endpointRequestId,
+        action: 'feedback.submitted',
+      });
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
@@ -585,6 +610,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
             ? 'Request approved and closed. You can now provide feedback.'
             : 'Request reopened for additional work.'),
       );
+      emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+        requestId: endpointRequestId,
+        action: `verify.${action}`,
+      });
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
@@ -639,6 +668,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         true
       );
       setSuccessMessage(response.message || 'Request reopened for additional work.');
+      emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+        requestId: endpointRequestId,
+        action: 'request.reopened',
+      });
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
@@ -741,6 +774,10 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
         true
       );
       setSuccessMessage(response.message || 'Request cancelled.');
+      emitRealtimeTopics(buildRequestRealtimeTopics(endpointRequestId), {
+        requestId: endpointRequestId,
+        action: 'request.cancelled',
+      });
 
       const data = await apiRequest<RequestDetailResponse>(
         `/api/requester/requests/${endpointRequestId}`,
@@ -785,8 +822,14 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
     <>
     <OverlayMessage message={loadError} tone="error" />
     <OverlayMessage message={successMessage} tone="success" />
-    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-100 flex items-end md:items-center justify-center p-0 md:p-6 animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-2xl h-[92vh] md:h-auto md:max-h-[90vh] rounded-t-[2.5rem] md:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-slate-200 animate-in slide-in-from-bottom duration-500 md:zoom-in-95">
+    <div
+      className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-100 flex items-end md:items-center justify-center p-0 md:p-6 animate-in fade-in duration-300"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-w-2xl h-[92vh] md:h-auto md:max-h-[90vh] rounded-t-[2.5rem] md:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-slate-200 animate-in slide-in-from-bottom duration-500 md:zoom-in-95"
+        onClick={(e) => e.stopPropagation()}
+      >
         
         {/* Header */}
         <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white sticky top-0 z-20">

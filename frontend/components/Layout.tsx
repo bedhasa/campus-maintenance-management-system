@@ -6,7 +6,7 @@ import Sidebar from './Sidebar';
 import { User } from '../types';
 import { useApp } from '../App';
 import RequestDetailModal from './RequestDetailModal';
-import { roleToBasePath } from '../lib/role-routes';
+import { normalizeUserRoles, roleToBasePath } from '../lib/role-routes';
 
 interface LayoutProps {
   user: User;
@@ -21,6 +21,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const basePath = roleToBasePath(user.role);
+  const accessibleRoles = new Set(normalizeUserRoles([user.role, ...(user.roles ?? [])]));
   
   const isRequester = user.role === 'requester';
   const isTechnician = user.role === 'technician';
@@ -28,7 +29,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
   // Filter notifications for this specific user
   const relevantNotifications = notifications.filter(n => {
     const forMe = !n.recipientId || n.recipientId === user.id;
-    const forMyRole = !n.recipientRole || n.recipientRole === user.role;
+    const forMyRole = !n.recipientRole || accessibleRoles.has(n.recipientRole);
     return forMe && forMyRole;
   });
 

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { apiRequest } from "@/lib/api";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
 import { 
   Search, Filter, ChevronRight, Clock, AlertTriangle, 
   CheckCircle2, User, MoreHorizontal, LayoutGrid, ListFilter
@@ -68,6 +69,12 @@ export default function WorkOrdersPage() {
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
+
+  useLiveRefresh(fetchOrders, {
+    enabled: true,
+    topics: ['work-orders', 'supervisor.work-orders', 'supervisor.dashboard', 'requests'],
+    refreshOnFocus: false,
+  });
 
   const updateFilter = (key: string, value: string) => {
     const newParams = new URLSearchParams(params?.toString() ?? "");

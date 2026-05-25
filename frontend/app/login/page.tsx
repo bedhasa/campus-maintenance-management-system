@@ -27,7 +27,8 @@ type LoginResponse = {
 
 export default function LoginForm() {
   const router = useRouter();
- const [login, setLogin] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -37,11 +38,19 @@ export default function LoginForm() {
 
   // Auto-hide error after 5 seconds
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
     if (error) {
       const timer = setTimeout(() => setError(""), 5000);
       return () => clearTimeout(timer);
     }
   }, [error]);
+
+  if (!mounted) {
+    return <div className="min-h-screen bg-slate-50" suppressHydrationWarning />;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -225,18 +234,6 @@ export default function LoginForm() {
             </div>
           </div>
 
-          {/* Demo Badge */}
-          <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-center items-center gap-4">
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                Demo Credentials
-              </span>
-              <code className="text-[10px] text-slate-500 bg-white px-2 py-1 rounded border border-slate-200">
-                sof123 | 123456
-                requester.demo
-              </code>
-            </div>
-          </div>
         </div>
       </div>
     </div>

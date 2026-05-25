@@ -275,10 +275,14 @@ export default function SparePartsManagementPage() {
 
       {/* Editor Modal */}
       {editorOpen && (
-        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/60 p-4 backdrop-blur-sm sm:items-center">
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/60 p-4 backdrop-blur-sm sm:items-center"
+          onClick={closeEditor}
+        >
           <form
             onSubmit={submitForm}
             className="flex max-h-[90vh] w-full max-w-2xl flex-col animate-in fade-in slide-in-from-bottom-4 rounded-[2.5rem] bg-white p-6 shadow-2xl md:p-7"
+            onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">

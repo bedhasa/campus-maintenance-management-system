@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { apiRequest } from "@/lib/api";
 import { buildStorageUrl } from "@/lib/runtime-config";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { buildRequestRealtimeTopics, buildWorkOrderRealtimeTopics, emitRealtimeTopics } from "@/lib/realtime";
 import { 
   X, ChevronLeft, ChevronRight, MapPin, Tag, Box, 
   Calendar, Clock, User, MessageSquare, Send, 
@@ -15,6 +17,7 @@ interface Props { id: string; initialTab?: "details" | "chat"; }
 // Types (Restricted to your provided structure)
 type RequestDetail = {
   id: number; title: string; description: string; status: string; priority: string; created_at: string;
+  due_date?: string | null;
   category_id?: number | null; custom_location?: string | null;
   requester?: { id?: number; fname?: string; lname?: string; phone?: string; email?: string; profile_picture_url?: string | null };
   category?: { id?: number; name?: string }; building?: { name?: string }; room?: { name?: string }; asset?: { name?: string };
@@ -70,7 +73,9 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   const [techSearch, setTechSearch] = useState("");
   const [startDate, setStartDate] = useState("");
   const [finishDate, setFinishDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
+  const [selectedPriority, setSelectedPriority] = useState("medium");
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
@@ -101,6 +106,21 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       chatRef.current.scrollTop = chatRef.current.scrollHeight;
     }
   }, [detail?.messages, activeTab]);
+
+  const realtimeTopics = useMemo(() => {
+    const requestId = detail?.id ?? id;
+    const latestWorkOrderId = detail?.work_orders?.[0]?.id;
+    return [
+      ...buildRequestRealtimeTopics(requestId),
+      ...buildWorkOrderRealtimeTopics(latestWorkOrderId, requestId),
+    ];
+  }, [detail?.id, detail?.work_orders, id]);
+
+  useLiveRefresh(load, {
+    enabled: true,
+    topics: realtimeTopics,
+    refreshOnFocus: false,
+  });
 
   const chatLocked = useMemo(() => detail?.status === "closed", [detail?.status]);
   const latestWorkOrder = useMemo(() => (detail?.work_orders ?? [])[0], [detail?.work_orders]);
@@ -183,6 +203,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       body: JSON.stringify({ message: newMessage }),
     }, true);
     setNewMessage("");
+    emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: "message.created" });
     await load();
   };
 
@@ -195,6 +216,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
     }, true);
     setEditingId(null);
     setEditingText("");
+    emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: "message.updated" });
     await load();
   };
 
@@ -203,6 +225,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
     const confirmed = window.confirm("Delete this message?");
     if (!confirmed) return;
     await apiRequest(`/api/supervisor/requests/${id}/messages/${messageId}`, { method: "DELETE" }, true);
+    emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: "message.deleted" });
     await load();
   };
 
@@ -224,6 +247,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, comment: comment?.trim() || undefined }),
       }, true);
+      emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: `review.${action}` });
       await load();
     } finally {
       setReviewing(false);
@@ -235,6 +259,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       setReviewing(true);
       setAssignError(null);
       await apiRequest(`/api/supervisor/requests/${id}/review/undo`, { method: "PATCH" }, true);
+      emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: "review.undo" });
       await load();
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : "Failed to undo review.");
@@ -263,6 +288,11 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       setTechnicians(techs);
       setSelectedTechId(techs[0]?.id ? String(techs[0].id) : "");
       setTechSearch("");
+      setStartDate("");
+      setFinishDate("");
+      setScheduledTime("");
+      setDueDate(detail?.due_date ? detail.due_date.slice(0, 10) : "");
+      setSelectedPriority(detail?.priority ?? "medium");
       if (techs.length === 0) setAssignError("No technicians found for this category.");
       setAssignOpen(true);
     } catch (error) {
@@ -288,9 +318,15 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
           assigned_to: Number(selectedTechId),
           start_date: startDate || null,
           finish_date: finishDate || null,
+          due_date: dueDate || null,
           scheduled_time: scheduledTime || null,
+          priority: selectedPriority || null,
         }),
       }, true);
+      emitRealtimeTopics([
+        ...buildRequestRealtimeTopics(id),
+        ...buildWorkOrderRealtimeTopics(undefined, id),
+      ], { requestId: id, action: "assign" });
       setAssignOpen(false);
       await load();
     } catch (error) {
@@ -305,6 +341,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       setLifecycleBusy(true);
       setAssignError(null);
       await apiRequest(`/api/supervisor/requests/${id}/${action}`, { method: "PATCH" }, true);
+      emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action });
       await load();
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : `Failed to ${action} request.`);
@@ -662,15 +699,15 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
 
       {/* LIGHTBOX (Untouched logic) */}
       {previewIndex !== null && (
-        <div className="fixed inset-0 z-[9999] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-8">
+        <div className="fixed inset-0 z-[9999] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-8" onClick={() => setPreviewIndex(null)}>
           <button onClick={() => setPreviewIndex(null)} className="absolute top-8 right-8 text-white hover:scale-110 transition-transform"><X size={32} /></button>
-          <img src={resolveImage(detail.images?.[previewIndex]?.image_path)} className="max-w-full max-h-[85vh] rounded-3xl animate-in zoom-in-95 duration-300" alt="Preview" />
+          <img src={resolveImage(detail.images?.[previewIndex]?.image_path)} className="max-w-full max-h-[85vh] rounded-3xl animate-in zoom-in-95 duration-300" alt="Preview" onClick={(e) => e.stopPropagation()} />
         </div>
       )}
 
       {assignOpen && (
-        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setAssignOpen(false)}>
+          <div className="w-full max-w-2xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-black text-slate-900">Assign Technician</h3>
               <button onClick={() => setAssignOpen(false)} className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
@@ -739,10 +776,38 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-                  <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Priority</p>
+                    <select
+                      value={selectedPriority}
+                      onChange={(e) => setSelectedPriority(e.target.value)}
+                      className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Due Date</p>
+                    <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  </div>
                 </div>
-                <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start Date</p>
+                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Finish Date</p>
+                    <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scheduled Time</p>
+                  <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+                </div>
               </>
             )}
 

@@ -5,15 +5,11 @@ import { useRouter } from "next/navigation";
 import { useApp } from "../App";
 import Layout from "./Layout";
 import { UserRole } from "../types";
-import { normalizeUserRole, roleDashboardPath } from "../lib/role-routes";
-import { apiRequest } from "../lib/api";
-
-type UserResponse = {
-  user?: {
-    active_role?: string | null;
-    roles?: Array<{ name?: string }>;
-  };
-};
+import {
+  normalizeUserRole,
+  resolveShellRole,
+  roleDashboardPath,
+} from "../lib/role-routes";
 
 interface RoleLayoutProps {
   role: UserRole;
@@ -25,12 +21,20 @@ export default function RoleLayout({ role, children }: RoleLayoutProps) {
   const router = useRouter();
   const [isChecking, setIsChecking] = useState(true);
   const currentUserRole = normalizeUserRole(currentUser?.role);
+  const roleNames = currentUser?.roles ?? [];
+  const shellRole = resolveShellRole(currentUserRole, roleNames);
+  const hasRoleAccess = Boolean(
+    currentUserRole === role || roleNames.includes(role)
+  );
 
   useEffect(() => {
     let isMounted = true;
 
     const authorize = async () => {
       setIsChecking(true);
+      const canAccessRole = Boolean(
+        currentUserRole === role || (currentUser?.roles ?? []).includes(role)
+      );
 
       if (!currentUser) {
         router.replace("/login");
@@ -45,44 +49,23 @@ export default function RoleLayout({ role, children }: RoleLayoutProps) {
         return;
       }
 
-      if (currentUserRole !== role) {
+      if (!canAccessRole) {
         router.replace(roleDashboardPath(currentUserRole));
         if (isMounted) setIsChecking(false);
         return;
       }
 
-      try {
-        const data = await apiRequest<UserResponse>("/api/user", { method: "GET" }, true);
-        const roleName = data.user?.active_role ?? data.user?.roles?.[0]?.name ?? null;
-        const normalizedRole = normalizeUserRole(roleName);
-
-        if (!normalizedRole) {
-          logout();
-          router.replace("/login");
-          return;
-        }
-
-        if (normalizedRole !== role) {
-          router.replace(roleDashboardPath(normalizedRole));
-          return;
-        }
-      } catch {
-        logout();
-        router.replace("/login");
-        return;
-      } finally {
-        if (isMounted) setIsChecking(false);
-      }
+      if (isMounted) setIsChecking(false);
     };
 
-    authorize();
+    void authorize();
 
     return () => {
       isMounted = false;
     };
   }, [currentUser, currentUserRole, role, router, logout]);
 
-  if (isChecking || !currentUser || !currentUserRole || currentUserRole !== role) {
+  if (isChecking || !currentUser || !currentUserRole || !hasRoleAccess || !shellRole) {
     return null;
   }
 
@@ -92,7 +75,7 @@ export default function RoleLayout({ role, children }: RoleLayoutProps) {
   };
 
   return (
-    <Layout user={{ ...currentUser, role: currentUserRole }} onLogout={handleLogout}>
+    <Layout user={{ ...currentUser, role: shellRole }} onLogout={handleLogout}>
       {children}
     </Layout>
   );

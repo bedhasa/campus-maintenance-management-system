@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import { buildStorageUrl } from "@/lib/runtime-config";
 import PageSkeleton from "@/components/PageSkeleton";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { buildWorkOrderRealtimeTopics, emitRealtimeTopics } from "@/lib/realtime";
 import { 
   BookOpen, Clock, HardHat, AlertCircle, MapPin, 
   Calendar, Phone, Mail, ChevronLeft, 
@@ -133,23 +135,34 @@ export default function WorkOrderDetailPage({ id }: Props) {
   const [selectedTechId, setSelectedTechId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [finishDate, setFinishDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [scheduledTime, setScheduledTime] = useState("");
+  const [selectedPriority, setSelectedPriority] = useState("medium");
+
+  const load = useCallback(async () => {
+    try {
+      setError(null);
+      const res = await apiRequest<{ success: boolean; work_order: WorkOrderDetail }>(
+        `/api/supervisor/work-orders/${id}`, { method: "GET" }, true
+      );
+      setData(res.work_order);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load work order details.";
+      setError(message);
+    }
+  }, [id]);
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        setError(null);
-        const res = await apiRequest<{ success: boolean; work_order: WorkOrderDetail }>(
-          `/api/supervisor/work-orders/${id}`, { method: "GET" }, true
-        );
-        setData(res.work_order);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to load work order details.";
-        setError(message);
-      }
-    };
-    void run();
-  }, [id]);
+    void load();
+  }, [load]);
+
+  const realtimeTopics = useMemo(() => buildWorkOrderRealtimeTopics(id), [id]);
+
+  useLiveRefresh(load, {
+    enabled: true,
+    topics: realtimeTopics,
+    refreshOnFocus: false,
+  });
 
   const closeManualWorkOrder = async () => {
     try {
@@ -165,6 +178,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
         setData(res.work_order);
       }
       setSuccessMessage(res.message ?? "Manual work order closed.");
+      emitRealtimeTopics(buildWorkOrderRealtimeTopics(id), { workOrderId: id, action: "close" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to close manual work order.");
     } finally {
@@ -189,6 +203,11 @@ export default function WorkOrderDetailPage({ id }: Props) {
       const techList = res.technicians ?? [];
       setTechnicians(techList);
       setSelectedTechId(techList[0]?.id ? String(techList[0].id) : "");
+      setStartDate("");
+      setFinishDate("");
+      setScheduledTime("");
+      setDueDate(data?.request?.due_date ? data.request.due_date.slice(0, 10) : "");
+      setSelectedPriority(data?.priority ?? "medium");
       setReassignOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load technicians.");
@@ -212,13 +231,16 @@ export default function WorkOrderDetailPage({ id }: Props) {
             assigned_to: Number(selectedTechId),
             start_date: startDate || null,
             finish_date: finishDate || null,
+            due_date: dueDate || null,
             scheduled_time: scheduledTime || null,
+            priority: selectedPriority || null,
           }),
         },
         true
       );
       setSuccessMessage(res.message ?? "Work order reassigned.");
       setReassignOpen(false);
+      emitRealtimeTopics(buildWorkOrderRealtimeTopics(id), { workOrderId: id, action: "reassign" });
       const refreshed = await apiRequest<{ success: boolean; work_order: WorkOrderDetail }>(
         `/api/supervisor/work-orders/${id}`,
         { method: "GET" },
@@ -698,8 +720,8 @@ export default function WorkOrderDetailPage({ id }: Props) {
       </div>
 
       {reassignOpen && (
-        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setReassignOpen(false)}>
+          <div className="w-full max-w-2xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-black text-slate-900">Reassign Work Order</h3>
               <button onClick={() => setReassignOpen(false)} className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
@@ -721,10 +743,39 @@ export default function WorkOrderDetailPage({ id }: Props) {
             </select>
 
             <div className="grid grid-cols-2 gap-3">
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-              <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Priority</p>
+                <select
+                  value={selectedPriority}
+                  onChange={(e) => setSelectedPriority(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Due Date</p>
+                <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+              </div>
             </div>
-            <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start Date</p>
+                <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Finish Date</p>
+                <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scheduled Time</p>
+              <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
+            </div>
 
             <div className="flex justify-end gap-2">
               <button onClick={() => setReassignOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black uppercase">Cancel</button>

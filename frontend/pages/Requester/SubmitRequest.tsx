@@ -9,6 +9,13 @@ import { apiRequest } from "../../lib/api";
 type Category = { id: number; name: string; description?: string | null };
 type Building = { id: number; name: string };
 type Room = { id: number; building_id: number; name: string };
+type Asset = {
+  id: number;
+  name: string;
+  building_id?: number | null;
+  room_id?: number | null;
+  category_id?: number | null;
+};
 
 type EditRequest = {
   id: number;
@@ -20,6 +27,8 @@ type EditRequest = {
   building_name?: string | null;
   room_id: number | null;
   room_name?: string | null;
+  asset_id: number | null;
+  asset_name?: string | null;
   custom_location: string | null;
   priority: "low" | "medium" | "high" | "urgent";
   status?: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed" | "cancelled";
@@ -35,11 +44,13 @@ type RequestDetailForEditResponse = {
     category_id?: number | null;
     building_id?: number | null;
     room_id?: number | null;
+    asset_id?: number | null;
     custom_location?: string | null;
     status: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed" | "cancelled";
     category?: { id?: number; name?: string | null } | null;
     building?: { id?: number; name?: string | null } | null;
     room?: { id?: number; name?: string | null } | null;
+    asset?: { id?: number; name?: string | null } | null;
   };
 };
 
@@ -53,10 +64,37 @@ type SettingsResponse = {
   };
 };
 
+type RequestListItem = {
+  id: number;
+  title: string;
+  priority: "low" | "medium" | "high" | "urgent";
+  status: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed" | "cancelled";
+  created_at: string;
+};
+
+type RequestListResponse = {
+  success: boolean;
+  requests: {
+    data: RequestListItem[];
+  };
+};
+
+type RequestPayload = {
+  title: string;
+  description: string;
+  category_id: number;
+  building_id: number | null;
+  room_id: number | null;
+  asset_id: number | null;
+  custom_location: string | null;
+  priority: "low" | "medium" | "high" | "urgent";
+};
+
 interface RequestFormInputs {
   title: string;
   building: string;
   room: string;
+  asset: string;
   locationType: "structured" | "custom";
   customLocation: string;
   problemType: string;
@@ -79,6 +117,14 @@ const fromApiPriority = (value: "low" | "medium" | "high" | "urgent"): Priority 
 };
 
 const normalizeName = (value?: string | null) => (value ?? "").trim().toLowerCase();
+const normalizeText = (value?: string | null) => (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+const isRecoverableSubmissionError = (error: unknown) =>
+  error instanceof Error &&
+  (
+    error.message === "Request timed out. Please try again." ||
+    error.message === "Unable to reach the server. Please check your connection and try again."
+  );
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SubmitRequest: React.FC = () => {
   const navigate = useNavigate();
@@ -100,6 +146,10 @@ const SubmitRequest: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [submissionNotice, setSubmissionNotice] = useState<string | null>(null);
+
+  const REQUEST_SUBMIT_TIMEOUT_MS = 120000;
 
   const requestIdToResubmit = useMemo(() => location.state?.requestIdToResubmit ?? null, [location.state]);
 
@@ -114,6 +164,7 @@ const SubmitRequest: React.FC = () => {
     title: "",
     building: "",
     room: "",
+    asset: "",
     locationType: "structured",
     customLocation: "",
     problemType: "",
@@ -155,6 +206,7 @@ const SubmitRequest: React.FC = () => {
           locationType: "structured",
           building: buildingId ? String(buildingId) : prev.building,
           room: roomId ? String(roomId) : prev.room,
+          asset: "",
         }));
         setDefaultsApplied(true);
       } catch {
@@ -216,6 +268,8 @@ const SubmitRequest: React.FC = () => {
           building_name: req.building?.name ?? null,
           room_id: req.room_id ?? req.room?.id ?? null,
           room_name: req.room?.name ?? null,
+          asset_id: req.asset_id ?? req.asset?.id ?? null,
+          asset_name: req.asset?.name ?? null,
           custom_location: req.custom_location ?? null,
           priority: req.priority,
           status: req.status,
@@ -255,19 +309,23 @@ const SubmitRequest: React.FC = () => {
     const resolvedRoom =
       (editData.room_id ? String(editData.room_id) : "") ||
       String(rooms.find((r) => normalizeName(r.name) === normalizeName(editData.room_name))?.id ?? "");
+    const resolvedAsset =
+      (editData.asset_id ? String(editData.asset_id) : "") ||
+      String(assets.find((asset) => normalizeName(asset.name) === normalizeName(editData.asset_name))?.id ?? "");
     const hasStructuredLocation = Boolean(resolvedBuilding || resolvedRoom || editData.building_name || editData.room_name);
 
     setFormData({
       title: editData.title,
       building: resolvedBuilding,
       room: resolvedRoom,
+      asset: resolvedAsset,
       locationType: hasStructuredLocation ? "structured" : "custom",
       customLocation: editData.custom_location ?? "",
       problemType: resolvedCategory,
       urgency: fromApiPriority(editData.priority),
       description: editData.description,
     });
-  }, [editData, categories, buildings, rooms]);
+  }, [editData, categories, buildings, rooms, assets]);
 
   useEffect(() => {
     if (!editData || isResubmitting) return; // Don't apply room logic if resubmitting
@@ -300,6 +358,7 @@ const SubmitRequest: React.FC = () => {
     const loadRooms = async () => {
       if (!formData.building) {
         setRooms([]);
+        setAssets([]);
         return;
       }
       try {
@@ -315,6 +374,56 @@ const SubmitRequest: React.FC = () => {
     };
     loadRooms();
   }, [formData.building]);
+
+  useEffect(() => {
+    if (formData.locationType !== "structured" || !formData.building) {
+      setAssets([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAssets = async () => {
+      const params = new URLSearchParams();
+      params.set("building_id", formData.building);
+      if (formData.room) {
+        params.set("room_id", formData.room);
+      }
+      if (formData.problemType) {
+        params.set("category_id", formData.problemType);
+      }
+
+      try {
+        const data = await apiRequest<{ assets: Asset[] }>(
+          `/api/requester/meta/assets?${params.toString()}`,
+          { method: "GET" },
+          true
+        );
+        if (!cancelled) {
+          setAssets(data.assets ?? []);
+        }
+      } catch {
+        if (!cancelled) {
+          setAssets([]);
+        }
+      }
+    };
+
+    loadAssets();
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.locationType, formData.building, formData.room, formData.problemType]);
+
+  useEffect(() => {
+    if (!isSubmitted) return;
+
+    const timer = window.setTimeout(() => {
+      navigate("/requester/dashboard");
+    }, 10000);
+
+    return () => window.clearTimeout(timer);
+  }, [isSubmitted, navigate]);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
@@ -337,6 +446,7 @@ const SubmitRequest: React.FC = () => {
 
   const updateField = <K extends keyof RequestFormInputs>(key: K, value: RequestFormInputs[K]) => {
     setError(null);
+    setSubmissionNotice(null);
     setFormData((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -356,6 +466,98 @@ const SubmitRequest: React.FC = () => {
     setStep((prev) => prev + 1);
   };
 
+  const requestMatchesPayload = (request: RequestDetailForEditResponse["request"], payload: RequestPayload) => {
+    const requestCategoryId = request.category_id ?? request.category?.id ?? null;
+    const requestBuildingId = request.building_id ?? request.building?.id ?? null;
+    const requestRoomId = request.room_id ?? request.room?.id ?? null;
+    const requestAssetId = request.asset_id ?? request.asset?.id ?? null;
+
+    return (
+      normalizeText(request.title) === normalizeText(payload.title) &&
+      normalizeText(request.description) === normalizeText(payload.description) &&
+      request.priority === payload.priority &&
+      Number(requestCategoryId ?? 0) === Number(payload.category_id ?? 0) &&
+      Number(requestBuildingId ?? 0) === Number(payload.building_id ?? 0) &&
+      Number(requestRoomId ?? 0) === Number(payload.room_id ?? 0) &&
+      Number(requestAssetId ?? 0) === Number(payload.asset_id ?? 0) &&
+      normalizeText(request.custom_location) === normalizeText(payload.custom_location)
+    );
+  };
+
+  const uploadImagesForRequest = async (requestId: number) => {
+    if (images.length === 0) return null;
+
+    try {
+      for (const file of images) {
+        const body = new FormData();
+        body.append("image", file);
+        await apiRequest(`/api/requester/requests/${requestId}/images`, {
+          method: "POST",
+          body,
+        }, true, REQUEST_SUBMIT_TIMEOUT_MS);
+      }
+      return null;
+    } catch {
+      return "Your request was submitted, but one or more photos are still missing. You can open the request and add them again.";
+    }
+  };
+
+  const resolveTimedOutSubmission = async (payload: RequestPayload, submittedAt: number, existingRequestId?: number) => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        if (existingRequestId) {
+          const detail = await apiRequest<RequestDetailForEditResponse>(
+            `/api/requester/requests/${existingRequestId}`,
+            { method: "GET" },
+            true,
+            20000
+          );
+          if (requestMatchesPayload(detail.request, payload)) {
+            return existingRequestId;
+          }
+        } else {
+          const params = new URLSearchParams();
+          params.set("search", payload.title);
+          const list = await apiRequest<RequestListResponse>(
+            `/api/requester/requests?${params.toString()}`,
+            { method: "GET" },
+            true,
+            20000
+          );
+
+          const candidates = (list.requests?.data ?? [])
+            .filter((item) => normalizeText(item.title) === normalizeText(payload.title))
+            .filter((item) => {
+              const createdAt = new Date(item.created_at).getTime();
+              return Number.isFinite(createdAt) && createdAt >= submittedAt - 5 * 60 * 1000;
+            })
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .slice(0, 3);
+
+          for (const candidate of candidates) {
+            const detail = await apiRequest<RequestDetailForEditResponse>(
+              `/api/requester/requests/${candidate.id}`,
+              { method: "GET" },
+              true,
+              20000
+            );
+            if (requestMatchesPayload(detail.request, payload)) {
+              return candidate.id;
+            }
+          }
+        }
+      } catch {
+        // Keep polling briefly before we give up on timeout recovery.
+      }
+
+      if (attempt < 2) {
+        await wait(2500);
+      }
+    }
+
+    return null;
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isEditLocked && !isResubmitting) { // Allow resubmitting locked requests
@@ -369,48 +571,74 @@ const SubmitRequest: React.FC = () => {
 
     setIsSubmitting(true);
     setError(null);
+    setSubmissionNotice(null);
+    const submittedAt = Date.now();
+    const payload: RequestPayload = {
+      title: formData.title,
+      description: formData.description,
+      category_id: Number(formData.problemType),
+      building_id: formData.locationType === "structured" ? Number(formData.building) : null,
+      room_id: formData.locationType === "structured" ? Number(formData.room) : null,
+      asset_id: formData.locationType === "structured" && formData.asset ? Number(formData.asset) : null,
+      custom_location: formData.locationType === "custom" ? formData.customLocation : null,
+      priority: toApiPriority(formData.urgency),
+    };
     try {
-      const payload = {
-        title: formData.title,
-        description: formData.description,
-        category_id: Number(formData.problemType),
-        building_id: formData.locationType === "structured" ? Number(formData.building) : null,
-        room_id: formData.locationType === "structured" ? Number(formData.room) : null,
-        custom_location: formData.locationType === "custom" ? formData.customLocation : null,
-        priority: toApiPriority(formData.urgency),
-      };
-
       let requestId: number;
       if (editData?.id) {
         await apiRequest(`/api/requester/requests/${editData.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-        }, true);
+        }, true, REQUEST_SUBMIT_TIMEOUT_MS);
         requestId = editData.id;
       } else {
         const created = await apiRequest<{ success: boolean; request: { id: number } }>("/api/requester/requests", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-        }, true);
+        }, true, REQUEST_SUBMIT_TIMEOUT_MS);
         requestId = created.request.id;
       }
 
-      if (images.length > 0 && requestId) {
-        for (const file of images) {
-          const body = new FormData();
-          body.append("image", file);
-          await apiRequest(`/api/requester/requests/${requestId}/images`, {
-            method: "POST",
-            body,
-          }, true);
-        }
+      const imageUploadNotice = await uploadImagesForRequest(requestId);
+      if (imageUploadNotice) {
+        setSubmissionNotice(imageUploadNotice);
       }
 
       setSubmittedId(requestId);
       setIsSubmitted(true);
     } catch (err) {
+      if (isRecoverableSubmissionError(err)) {
+        const recoveredRequestId = await resolveTimedOutSubmission(payload, submittedAt, editData?.id);
+        if (recoveredRequestId) {
+          let recoveryNotice = editData?.id
+            ? "Your update took longer than expected, but it was saved successfully."
+            : "Your request took longer than expected, but it was submitted successfully.";
+
+          const imageUploadNotice = await uploadImagesForRequest(recoveredRequestId);
+          if (imageUploadNotice) {
+            recoveryNotice = `${recoveryNotice} ${imageUploadNotice}`;
+          }
+
+          setSubmissionNotice(recoveryNotice);
+          setSubmittedId(recoveredRequestId);
+          setIsSubmitted(true);
+          setIsSubmitting(false);
+          return;
+        }
+
+        setSubmissionNotice(
+          editData?.id
+            ? "Your update is being finalized. Redirecting you back to the dashboard."
+            : "Your request is being finalized. Redirecting you back to the dashboard."
+        );
+        setSubmittedId(editData?.id ?? null);
+        setIsSubmitted(true);
+        setIsSubmitting(false);
+        return;
+      }
+
       const message = err instanceof Error ? err.message : "Failed to submit request.";
       setError(message);
     } finally {
@@ -428,9 +656,22 @@ const SubmitRequest: React.FC = () => {
         <p className="text-slate-600 font-bold mb-10 max-w-sm mx-auto leading-relaxed">
           {submittedId ? `Request #${submittedId} has been sent to maintenance.` : "Your request has been sent to maintenance."}
         </p>
-        <button onClick={() => navigate("/requester/dashboard")} className="w-full py-5 bg-[#003366] text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all">
-          View My Requests
-        </button>
+        {submissionNotice && (
+          <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+            {submissionNotice}
+          </div>
+        )}
+        <div className="space-y-4">
+          <p className="text-xs font-black uppercase tracking-widest text-slate-400">
+            Redirecting to dashboard in 10 seconds...
+          </p>
+          <button
+            onClick={() => navigate("/requester/dashboard")}
+            className="w-full py-5 bg-[#003366] text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all"
+          >
+            Go To Dashboard
+          </button>
+        </div>
       </div>
     );
   }
@@ -546,6 +787,7 @@ const SubmitRequest: React.FC = () => {
                     onChange={(e) => {
                       updateField("building", e.target.value);
                       updateField("room", "");
+                      updateField("asset", "");
                     }}
                     className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-2xl font-bold text-slate-800 focus:border-blue-500 outline-none shadow-sm"
                   >
@@ -557,12 +799,27 @@ const SubmitRequest: React.FC = () => {
                   <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Select Room</label>
                   <select
                     value={formData.room}
-                    onChange={(e) => updateField("room", e.target.value)}
+                    onChange={(e) => {
+                      updateField("room", e.target.value);
+                      updateField("asset", "");
+                    }}
                     disabled={!formData.building}
                     className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-2xl font-bold text-slate-800 focus:border-blue-500 outline-none shadow-sm disabled:opacity-50"
                   >
                     <option value="">{formData.building ? "Choose Room..." : "Select building first"}</option>
                     {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-3">
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Linked Asset (Optional)</label>
+                  <select
+                    value={formData.asset}
+                    onChange={(e) => updateField("asset", e.target.value)}
+                    disabled={!formData.building}
+                    className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-2xl font-bold text-slate-800 focus:border-blue-500 outline-none shadow-sm disabled:opacity-50"
+                  >
+                    <option value="">{formData.building ? "Select Asset..." : "Select building first"}</option>
+                    {assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.name}</option>)}
                   </select>
                 </div>
               </div>

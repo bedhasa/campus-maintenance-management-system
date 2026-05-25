@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useApp } from '../App';
-import { roleToBasePath } from '../lib/role-routes';
+import { normalizeUserRoles, roleToBasePath } from '../lib/role-routes';
 
 interface SidebarProps {
   role: UserRole;
@@ -31,6 +31,9 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) => {
   const { notifications, currentUser, t } = useApp();
+  const accessibleRoles = new Set(
+    normalizeUserRoles([currentUser?.role, ...(currentUser?.roles ?? [])]),
+  );
   
   // Apply the same strict filtering logic for the sidebar badge
   const relevantNotifications = notifications.filter(n => {
@@ -38,17 +41,18 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
       return n.recipientId === currentUser?.id;
     }
     if (n.recipientRole) {
-      return n.recipientRole === role;
+      return accessibleRoles.has(n.recipientRole);
     }
     return true;
   });
   
   const unreadCount = relevantNotifications.filter(n => !n.read).length;
   const basePath = roleToBasePath(role);
-  const hasSupervisorAdminAccess =
-    role === 'supervisor' &&
-    !!currentUser?.roles?.includes('supervisor') &&
-    !!currentUser?.roles?.includes('admin');
+  const hasAdminRole = !!currentUser?.roles?.includes('admin') || role === 'admin';
+  const hasSupervisorRole = !!currentUser?.roles?.includes('supervisor') || role === 'supervisor';
+  const hasSupervisorAdminAccess = hasSupervisorRole && hasAdminRole;
+  const dashboardPath =
+    role === 'admin' && hasSupervisorAdminAccess ? '/supervisor/dashboard' : `${basePath}/dashboard`;
 
   const getNavItems = () => {
     const base: Array<{
@@ -103,11 +107,15 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
         break;
       case 'admin':
         base.push(
-          { name: t('dashboard'), path: '/admin/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "System overview" },
-          { name: 'Users', path: '/admin/users', icon: <Users size={18} />, tooltip: "User management" },
+          { name: t('dashboard'), path: dashboardPath, icon: <LayoutDashboard size={18} />, tooltip: hasSupervisorAdminAccess ? "Operational data" : "System overview" },
+          { name: 'Requests', path: '/supervisor/requests', icon: <ClipboardList size={18} />, tooltip: "Review approvals" },
+          { name: t('workOrders'), path: '/supervisor/work-orders', icon: <ListTodo size={18} />, tooltip: "Track work execution" },
+          { name: 'Technicians', path: '/supervisor/technicians', icon: <Users size={18} />, tooltip: "Manage maintenance staff" },
+          { name: 'Maintenance Center', path: '/supervisor/maintenance-center', icon: <Calendar size={18} />, tooltip: "Manual WO and PM in one page" },
+          { name: 'Facility Management', path: '/supervisor/facility-management', icon: <Building2 size={18} />, tooltip: "Register assets, buildings, departments" },
+          { name: 'Reports', path: '/supervisor/reports', icon: <ClipboardList size={18} />, tooltip: "Export reports" },
+          { name: 'User Management', path: '/admin/users', icon: <Users size={18} />, tooltip: "User management" },
           { name: 'System Logs', path: '/admin/system-logs', icon: <History size={18} />, tooltip: "Audit trail" },
-          { name: 'Facility Management', path: '/admin/facility-management', icon: <Building2 size={18} />, tooltip: "Register assets, buildings, departments" },
-          { name: 'Reports', path: '/admin/reports', icon: <ClipboardList size={18} />, tooltip: "Export reports" },
         );
         break;
     }
@@ -186,7 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
 
       <div className="p-3 border-t border-blue-800 space-y-0.5">
         <NavLink 
-          to={`${basePath}/settings`}
+          to={dashboardPath.replace('/dashboard', '/settings')}
           onClick={handleNavClick}
           className={({ isActive }) => `group relative flex items-center space-x-3 w-full px-3 py-2.5 rounded-lg transition-colors ${isActive ? 'bg-blue-700 text-white' : 'text-blue-100 hover:bg-blue-800'}`}
         >

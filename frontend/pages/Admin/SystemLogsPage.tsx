@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { apiRequest, readAuthToken } from "@/lib/api";
 import { buildApiUrl } from "@/lib/runtime-config";
@@ -19,6 +20,9 @@ type Log = {
 };
 
 export default function SystemLogsPage() {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [logs, setLogs] = useState<Log[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +36,21 @@ export default function SystemLogsPage() {
   const [status, setStatus] = useState("");
   const [userId, setUserId] = useState("");
   const [page, setPage] = useState(1);
+  const selectedLogRaw = params?.get("log");
+  const selectedLogId = selectedLogRaw ? Number(selectedLogRaw) : NaN;
+
+  const setSelectedLogParam = (logId: number | null) => {
+    const nextParams = new URLSearchParams(params?.toString() ?? "");
+    if (logId === null) {
+      nextParams.delete("log");
+    } else {
+      nextParams.set("log", String(logId));
+    }
+
+    const query = nextParams.toString();
+    const nextPath = pathname ?? "/admin/system-logs";
+    router.push(query ? `${nextPath}?${query}` : nextPath);
+  };
 
   const load = async (opts?: { exportExcel?: boolean }) => {
     setLoading(true);
@@ -118,6 +137,17 @@ export default function SystemLogsPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  useEffect(() => {
+    if (!Number.isFinite(selectedLogId) || selectedLogId <= 0) {
+      return;
+    }
+
+    const matchedLog = logs.find((log) => log.id === selectedLogId);
+    if (matchedLog) {
+      setSelected(matchedLog);
+    }
+  }, [logs, selectedLogId]);
+
   return (
     <div className="mx-auto max-w-7xl space-y-6 pb-16">
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -198,7 +228,10 @@ export default function SystemLogsPage() {
             {pagedLogs.map((l) => {
               const userName = l.user ? `${l.user.fname ?? ""} ${l.user.lname ?? ""}`.trim() : "System";
               return (
-                <tr key={l.id} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelected(l)}>
+                <tr key={l.id} className="cursor-pointer hover:bg-slate-50" onClick={() => {
+                  setSelected(l);
+                  setSelectedLogParam(l.id);
+                }}>
                   <td className="px-4 py-3 text-sm font-semibold text-slate-900">{new Date(l.created_at).toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm font-semibold text-slate-900">{userName}</td>
                   <td className="px-4 py-3 text-sm font-semibold text-slate-900">{l.module}</td>
@@ -253,14 +286,20 @@ export default function SystemLogsPage() {
       </div>
 
       {selected ? (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4">
-          <div className="mx-auto max-w-2xl rounded-3xl bg-white p-6 shadow-xl">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4" onClick={() => {
+          setSelected(null);
+          setSelectedLogParam(null);
+        }}>
+          <div className="mx-auto max-w-2xl rounded-3xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-xl font-black text-slate-900">Log Detail</h2>
                 <p className="mt-1 text-sm font-semibold text-slate-600">ID #{selected.id}</p>
               </div>
-              <button type="button" onClick={() => setSelected(null)} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-black text-slate-900">
+              <button type="button" onClick={() => {
+                setSelected(null);
+                setSelectedLogParam(null);
+              }} className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-black text-slate-900">
                 Close
               </button>
             </div>

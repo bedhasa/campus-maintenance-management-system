@@ -1,14 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest, clearAuth } from "@/lib/api";
 import { normalizeUserRole, roleDashboardPath } from "@/lib/role-routes";
 
 export default function Dashboard() {
   const router = useRouter();
+  const hasResolvedRef = useRef(false);
 
   useEffect(() => {
+    if (hasResolvedRef.current) {
+      return;
+    }
+    hasResolvedRef.current = true;
+
+    let isActive = true;
+
     const redirectToRoleDashboard = async () => {
       try {
         const data = await apiRequest<{ user?: { active_role?: string | null; roles?: Array<{ name?: string }> } }>(
@@ -19,14 +27,22 @@ export default function Dashboard() {
         const roleName = data.user?.active_role ?? data.user?.roles?.[0]?.name ?? null;
         const normalizedRole = normalizeUserRole(roleName);
         const destination = normalizedRole ? roleDashboardPath(normalizedRole) : "/login";
-        router.replace(destination);
+        if (isActive) {
+          router.replace(destination);
+        }
       } catch {
         clearAuth();
-        router.replace("/login");
+        if (isActive) {
+          router.replace("/login");
+        }
       }
     };
 
-    redirectToRoleDashboard();
+    void redirectToRoleDashboard();
+
+    return () => {
+      isActive = false;
+    };
   }, [router]);
 
   return (

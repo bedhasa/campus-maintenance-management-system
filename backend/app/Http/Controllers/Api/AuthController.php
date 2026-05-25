@@ -60,7 +60,7 @@ class AuthController extends Controller
                 'required',
                 'string',
                 'confirmed',
-                PasswordRule::min(8)->letters()->mixedCase()->numbers()->symbols(),
+                PasswordRule::min(8)->letters()->mixedCase()->numbers(),
             ],
             'university_id_number' => ['required', 'string', 'max:255', 'regex:' . self::UNIVERSITY_ID_REGEX],
             'dept_id' => ['required', 'integer', 'exists:departments,id'],
@@ -147,92 +147,102 @@ class AuthController extends Controller
     }
 
     public function login(Request $request)
-{
-    $validated = $request->validate([
-        'login' => ['required', 'string'],
-        'password' => ['required', 'string'],
-    ]);
-
-    // Detect if login is email or username
-    $loginType = filter_var($validated['login'], FILTER_VALIDATE_EMAIL)
-        ? 'email'
-        : 'username';
-
-    // Find user by email OR username
-    $user = User::where($loginType, $validated['login'])->first();
-
-    if (!$user || !Hash::check($validated['password'], $user->password)) {
-        ActivityLogger::log(
-            $user?->id,
-            'auth',
-            'login',
-            'failed',
-            null,
-            'Failed login attempt.',
-            ['login' => $validated['login'], 'login_type' => $loginType],
-            $request
-        );
-        throw ValidationException::withMessages([
-            'login' => ['The provided credentials are incorrect.'],
+    {
+        $validated = $request->validate([
+            'login' => ['required', 'string'],
+            'password' => ['required', 'string'],
         ]);
-    }
 
-    if (!$user->is_verified) {
-        $message = $user->otp_expires_at && now()->greaterThan($user->otp_expires_at)
-            ? 'Your OTP has expired. Please request a new one.'
-            : 'Your account is not verified. Please verify the OTP sent to your email.';
+        $loginValue = trim($validated['login']);
+        $password = $validated['password'];
 
-        return response()->json([
-            'success' => false,
-            'message' => $message,
-            'email' => $user->email,
-        ], 403);
-    }
+        // Detect if login is email or username
+        $loginType = filter_var($loginValue, FILTER_VALIDATE_EMAIL)
+            ? 'email'
+            : 'username';
 
-    // Optional: prevent inactive users (only if the column exists)
-    if (array_key_exists('is_active', $user->getAttributes()) && !$user->is_active) {
+        // Find user by email OR username
+        $userQuery = User::query();
+        if ($loginType === 'email') {
+            $userQuery->whereRaw('LOWER(email) = ?', [Str::lower($loginValue)]);
+        } else {
+            $userQuery->where('username', $loginValue);
+        }
+
+        $user = $userQuery->first();
+
+        if (!$user || !Hash::check($password, $user->password)) {
+            ActivityLogger::log(
+                $user?->id,
+                'auth',
+                'login',
+                'failed',
+                null,
+                'Failed login attempt.',
+                ['login' => $loginValue, 'login_type' => $loginType],
+                $request
+            );
+            throw ValidationException::withMessages([
+                'login' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        if (!$user->is_verified) {
+            $message = $user->otp_expires_at && now()->greaterThan($user->otp_expires_at)
+                ? 'Your OTP has expired. Please request a new one.'
+                : 'Your account is not verified. Please verify the OTP sent to your email.';
+
+            return response()->json([
+                'success' => false,
+                'message' => $message,
+                'email' => $user->email,
+            ], 403);
+        }
+
+        // Optional: prevent inactive users (only if the column exists)
+        if (array_key_exists('is_active', $user->getAttributes()) && !$user->is_active) {
+            ActivityLogger::log(
+                $user->id,
+                'auth',
+                'login',
+                'failed',
+                null,
+                'Login blocked: inactive account.',
+                ['login' => $loginValue, 'login_type' => $loginType],
+                $request
+            );
+            return response()->json([
+                'success' => false,
+                'message' => 'Your account is inactive. Please contact support.'
+            ], 403);
+        }
+
+        $user->load(['roles', 'department']);
+        $roles = $user->roles;
+
+        [$abilities, $requiresRoleSelection] = $this->resolveAbilitiesAndSelection($roles);
+
+        $token = $user->createToken('auth_token', $abilities)->plainTextToken;
+
         ActivityLogger::log(
             $user->id,
             'auth',
             'login',
-            'failed',
+            'success',
             null,
-            'Login blocked: inactive account.',
-            ['login' => $validated['login'], 'login_type' => $loginType],
+            'User logged in.',
+            ['abilities' => $abilities],
             $request
         );
+
         return response()->json([
-            'success' => false,
-            'message' => 'Your account is inactive. Please contact support.'
-        ], 403);
+            'success' => true,
+            'message' => 'Login successful.',
+            'token' => $token,
+            'requires_role_selection' => $requiresRoleSelection,
+            'user' => $this->userPayload($user, $abilities),
+        ]);
     }
-
-    $user->load(['roles', 'department']);
-    $roles = $user->roles;
-
-    [$abilities, $requiresRoleSelection] = $this->resolveAbilitiesAndSelection($roles);
-
-    $token = $user->createToken('auth_token', $abilities)->plainTextToken;
-
-    ActivityLogger::log(
-        $user->id,
-        'auth',
-        'login',
-        'success',
-        null,
-        'User logged in.',
-        ['abilities' => $abilities],
-        $request
-    );
-
-    return response()->json([
-        'success' => true,
-        'message' => 'Login successful.',
-        'token' => $token,
-        'requires_role_selection' => $requiresRoleSelection,
-        'user' => $this->userPayload($user, $abilities),
-    ]);
-}
 
     public function logout(Request $request)
     {
@@ -317,7 +327,7 @@ class AuthController extends Controller
                 'required',
                 'string',
                 'confirmed',
-                PasswordRule::min(8)->letters()->mixedCase()->numbers()->symbols(),
+                PasswordRule::min(8)->letters()->mixedCase()->numbers(),
             ],
         ]);
 

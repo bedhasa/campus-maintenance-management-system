@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { apiRequest } from "@/lib/api";
 import { ListSkeleton } from "@/components/PageSkeleton";
 import RequestDetailPage from "./RequestDetailPage";
+import { useLiveRefresh } from "@/lib/use-live-refresh";
+import { buildRequestRealtimeTopics, emitRealtimeTopics } from "@/lib/realtime";
 import { 
   CheckCircle, XCircle, ChevronRight, 
   Clock, AlertTriangle, Hash, X, UserCheck
@@ -84,13 +86,20 @@ export default function SupervisorRequestsPage() {
     void run();
   }, [load]);
 
+  useLiveRefresh(load, {
+    enabled: true,
+    topics: ['supervisor.requests', 'supervisor.dashboard', 'requests'],
+    refreshOnFocus: false,
+  });
+
   const review = async (id: number, action: "approve" | "reject") => {
     await apiRequest(`/api/supervisor/requests/${id}/review`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
     }, true);
-    load();
+    emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: `review.${action}` });
+    void load();
   };
 
   const statusFilters = [
@@ -215,8 +224,8 @@ export default function SupervisorRequestsPage() {
       )}
 
       {hasOpenRequestModal && (
-        <div className="fixed inset-0 z-1200 bg-slate-900/70 backdrop-blur-sm p-2 md:p-5">
-          <div className="relative mx-auto h-[92vh] w-full max-w-5xl rounded-[2rem] bg-slate-50 shadow-2xl overflow-hidden border border-white/60">
+        <div className="fixed inset-0 z-1200 bg-slate-900/70 backdrop-blur-sm p-2 md:p-5" onClick={() => setRequestModal(null)}>
+          <div className="relative mx-auto h-[92vh] w-full max-w-5xl rounded-[2rem] bg-slate-50 shadow-2xl overflow-hidden border border-white/60" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               onClick={() => setRequestModal(null)}

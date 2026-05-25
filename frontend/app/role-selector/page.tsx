@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { 
   ClipboardList, 
@@ -38,19 +38,31 @@ type SelectRoleResponse = {
 
 export default function RoleSelector() {
   const router = useRouter();
+  const hasBootstrappedRef = useRef(false);
   const [loadingRole, setLoadingRole] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (hasBootstrappedRef.current) {
+      return;
+    }
+    hasBootstrappedRef.current = true;
+
+    let isActive = true;
+
     const bootstrap = async () => {
       const cached = readAuthUser<AuthUser>();
-      if (cached) {
+      if (cached && isActive) {
         setUser(cached);
       }
 
       try {
         const data = await apiRequest<UserResponse>("/api/user", { method: "GET" }, true);
+        if (!isActive) {
+          return;
+        }
+
         setUser(data.user);
         writeAuthUser(data.user);
 
@@ -59,13 +71,20 @@ export default function RoleSelector() {
           router.replace("/supervisor/dashboard");
           return;
         }
-      } catch (err) {
+      } catch {
+        if (!isActive) {
+          return;
+        }
         clearAuth();
-        router.push("/login");
+        router.replace("/login");
       }
     };
 
-    bootstrap();
+    void bootstrap();
+
+    return () => {
+      isActive = false;
+    };
   }, [router]);
 
   const handleRoleSelect = async (role: Role) => {

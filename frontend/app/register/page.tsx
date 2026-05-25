@@ -121,9 +121,9 @@ export default function RegistrationForm() {
     }
 
     // --- PASSWORD COMPLEXITY VALIDATION ---
-    const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
     if (!passwordRegex.test(formData.password)) {
-      setLocalError("Password must be 8+ characters, include 1 uppercase, 1 number, and 1 special character.");
+      setLocalError("Password must be at least 8 characters and include 1 uppercase letter and 1 number.");
       return;
     }
 
@@ -293,7 +293,7 @@ export default function RegistrationForm() {
                       </button>
                     </div>
                     <p className="text-[10px] text-slate-400 mt-1 italic ml-1">
-                      Must contain 8+ characters, 1 Uppercase, 1 Number, and 1 Special Character (@$!%*?&)
+                      Must contain at least 8 characters, 1 uppercase, and 1 number
                     </p>
                   </div>
                   

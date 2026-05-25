@@ -436,8 +436,8 @@ export default function UsersPage() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4">
-          <div className="mx-auto max-h-[92vh] max-w-3xl overflow-y-auto rounded-2xl bg-white p-5">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4" onClick={closePanels}>
+          <div className="mx-auto max-h-[92vh] max-w-3xl overflow-y-auto rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-black text-slate-900">
                 {editingUserId ? "Edit User" : "Create New User"}
@@ -529,8 +529,8 @@ export default function UsersPage() {
       )}
 
       {passwordUserId !== null && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4">
-          <div className="mx-auto max-w-md rounded-2xl bg-white p-5">
+        <div className="fixed inset-0 z-50 bg-slate-900/50 p-4" onClick={closePanels}>
+          <div className="mx-auto max-w-md rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-lg font-black text-slate-900">Reset Password</h2>
             <p className="mt-1 text-sm text-slate-500">Enter new password for selected user.</p>
             <input

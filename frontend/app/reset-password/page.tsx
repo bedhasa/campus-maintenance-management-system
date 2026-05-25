@@ -52,9 +52,9 @@ function ResetPasswordContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const passwordRegex = /^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+    const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
     if (!passwordRegex.test(password)) {
-      setError("Password must be 8+ characters and include an uppercase letter, a number, and a special character.");
+      setError("Password must be at least 8 characters and include an uppercase letter and a number.");
       return;
     }
 
@@ -179,7 +179,7 @@ function ResetPasswordContent() {
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-400 mt-1 italic ml-1">
-                  Must contain 8+ characters, 1 uppercase, 1 number, and 1 special character.
+                  Must contain at least 8 characters, 1 uppercase, and 1 number.
                 </p>
               </div>
 

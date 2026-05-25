@@ -75,7 +75,8 @@ export function clearAuth() {
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
-  includeAuth = false
+  includeAuth = false,
+  timeoutMs = REQUEST_TIMEOUT_MS
 ): Promise<T> {
   const headers = new Headers(options.headers ?? {});
   headers.set("Accept", "application/json");
@@ -88,7 +89,7 @@ export async function apiRequest<T>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   if (options.signal) {
     options.signal.addEventListener("abort", () => controller.abort(), { once: true });
