@@ -128,11 +128,17 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
     setIsSubmitting(true);
     try {
       const payload = {
-        ...formData,
+        title: formData.title,
+        description: formData.description,
         category_id: Number(formData.categoryId),
         building_id: formData.buildingId ? Number(formData.buildingId) : null,
         room_id: formData.roomId ? Number(formData.roomId) : null,
+        custom_location: formData.locationMode === "custom" ? formData.customLocation : null,
         assigned_to: formData.assignedTo ? Number(formData.assignedTo) : null,
+        priority: formData.priority === "high" ? "urgent" : formData.priority,
+        scheduled_date: formData.scheduledDate || null,
+        scheduled_time: formData.scheduledTime || null,
+        estimated_hours: formData.estimatedHours ? Number(formData.estimatedHours) : null,
         release
       };
 
@@ -284,6 +290,10 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
               <div>
                 <label className={labelStyle}>Date</label>
                 <input type="date" className={inputStyle} value={formData.scheduledDate} onChange={e => setFormData({...formData, scheduledDate: e.target.value})} />
+              </div>
+              <div>
+                <label className={labelStyle}>Time</label>
+                <input type="time" className={inputStyle} value={formData.scheduledTime} onChange={e => setFormData({...formData, scheduledTime: e.target.value})} />
               </div>
               <div>
                 <label className={labelStyle}>Est. Time (Hours)</label>

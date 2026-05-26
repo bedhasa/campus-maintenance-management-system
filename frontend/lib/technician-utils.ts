@@ -48,6 +48,8 @@ export type TechnicianLifecycleMeta = {
 
 export type TechnicianWorkOrder = {
   id: number;
+  title?: string | null;
+  description?: string | null;
   work_status: "assigned" | "in_progress" | "paused" | "completed" | string;
   expected_completion_date?: string | null;
   delay_reason?: string | null;
@@ -62,6 +64,11 @@ export type TechnicianWorkOrder = {
   status_updated_at?: string | null;
   completed_by_technician_at?: string | null;
   completed_at?: string | null;
+  category?: { id?: number; name?: string } | null;
+  building?: { id?: number; name?: string } | null;
+  room?: { id?: number; name?: string } | null;
+  custom_location?: string | null;
+  creator?: { fname?: string; lname?: string; phone?: string | null; email?: string | null } | null;
   request?: TechnicianRequestSummary | null;
 };
 
@@ -105,16 +112,17 @@ export const formatDateTime = (value?: string | null) => {
 };
 
 export const getTaskTitle = (task: TechnicianWorkOrder) =>
-  task.request?.title?.trim() || `Work Order #${task.id}`;
+  task.request?.title?.trim() || task.title?.trim() || `Work Order #${task.id}`;
 
 export const getTaskLocation = (task: TechnicianWorkOrder) => {
-  const building = task.request?.building?.name;
-  const room = task.request?.room?.name;
+  const building = task.request?.building?.name || task.building?.name;
+  const room = task.request?.room?.name || task.room?.name;
   if (building || room) {
     return `Building: ${building || "-"} | Room: ${room || "-"}`;
   }
-  if (task.request?.custom_location?.trim()) {
-    return `Custom Location: ${task.request.custom_location.trim()}`;
+  const customLocation = task.request?.custom_location?.trim() || task.custom_location?.trim();
+  if (customLocation) {
+    return `Custom Location: ${customLocation}`;
   }
   return "Location not specified";
 };

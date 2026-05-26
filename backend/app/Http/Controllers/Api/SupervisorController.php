@@ -1040,6 +1040,12 @@ class SupervisorController extends ModuleController
     {
         $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
         $validated = $request->validate([
+            'title' => ['required', 'string', 'max:150'],
+            'description' => ['nullable', 'string'],
+            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'building_id' => ['nullable', 'integer', 'exists:buildings,id'],
+            'room_id' => ['nullable', 'integer', 'exists:rooms,id'],
+            'custom_location' => ['nullable', 'string', 'max:255'],
             'assigned_to' => ['nullable', 'integer', 'exists:users,id'],
             'priority' => ['required', 'in:low,medium,high,urgent'],
             'scheduled_date' => ['nullable', 'date'],
@@ -1057,6 +1063,12 @@ class SupervisorController extends ModuleController
             'request_id' => null,
             'created_by' => $user->id,
             'assigned_to' => $validated['assigned_to'] ?? null,
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? null,
+            'category_id' => $validated['category_id'],
+            'building_id' => $validated['building_id'] ?? null,
+            'room_id' => $validated['room_id'] ?? null,
+            'custom_location' => $validated['custom_location'] ?? null,
             'priority' => $validated['priority'],
             'scheduled_date' => $validated['scheduled_date'] ?? null,
             'scheduled_time' => $validated['scheduled_time'] ?? null,
@@ -1099,10 +1111,40 @@ class SupervisorController extends ModuleController
             $request
         );
 
+        if ($status === 'assigned' && !empty($validated['assigned_to'])) {
+            $workOrder->loadMissing(['building:id,name', 'room:id,name']);
+            $supervisorName = $this->fullName($user);
+            $location = $validated['custom_location']
+                ?? trim(collect([
+                    optional($workOrder->building)->name,
+                    optional($workOrder->room)->name,
+                ])->filter()->implode(' / '));
+            $messageParts = [
+                "Manual work order: {$workOrder->title}.",
+                !empty($validated['description']) ? "Details: {$validated['description']}." : null,
+                $location !== '' ? "Location: {$location}." : null,
+                "Assigned by Supervisor {$supervisorName}.",
+            ];
+
+            $this->notifyTechnician(
+                (int) $validated['assigned_to'],
+                'manual_work_order_assigned',
+                trim(implode(' ', array_filter($messageParts))),
+                (int) $workOrder->id
+            );
+        }
+
         return response()->json([
             'success' => true,
             'message' => $status === 'draft' ? 'Manual work order saved as draft.' : 'Manual work order released.',
-            'work_order' => $workOrder->load(['assignee:id,fname,lname,phone', 'spareParts.sparePart']),
+            'work_order' => $workOrder->load([
+                'assignee:id,fname,lname,phone',
+                'creator:id,fname,lname,phone,email',
+                'category:id,name',
+                'building:id,name',
+                'room:id,name',
+                'spareParts.sparePart',
+            ]),
         ], 201);
     }
 

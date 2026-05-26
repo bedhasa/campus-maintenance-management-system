@@ -153,7 +153,7 @@ const Layout: React.FC<LayoutProps> = ({ user, onLogout, children }) => {
         </header>
 
         <main className={`flex-1 overflow-y-auto p-6 md:p-8 ${isTechnician ? 'pb-24 md:pb-8' : ''} ${isRequester ? 'pb-28 md:pb-28' : ''}`}>
-          <div className="max-w-7xl mx-auto">
+          <div className={`max-w-7xl mx-auto ${isTechnician ? 'cmms-light-surface' : ''}`}>
             {children}
           </div>
         </main>

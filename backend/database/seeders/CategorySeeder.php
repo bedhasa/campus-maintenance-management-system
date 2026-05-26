@@ -12,8 +12,8 @@ class CategorySeeder extends Seeder
         $categories = [
             ['name' => 'Electrical', 'description' => 'Power, lighting, and wiring issues.'],
             ['name' => 'Plumbing', 'description' => 'Leakage, drainage, and water system issues.'],
-            ['name' => 'HVAC', 'description' => 'Heating, ventilation, and air-conditioning faults.'],
-            ['name' => 'IT Equipment', 'description' => 'Computers, printers, and network devices.'],
+            ['name' => 'Construction', 'description' => 'Building structure, wall, ceiling, floor, roofing, and general construction-related maintenance issues.'],
+            ['name' => 'Networking Issue (IT)', 'description' => 'Computers, printers, and network devices.'],
             ['name' => 'Furniture', 'description' => 'Desks, chairs, doors, and physical fittings.'],
         ];
 

@@ -69,6 +69,25 @@ html[data-font-size="large"] body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Light card surfaces for technician (and similar) UIs — avoids inheriting dark-theme body text on white panels */
+.cmms-light-surface {
+  color: #0f172a;
+  color-scheme: light;
+}
+
+.cmms-light-surface input,
+.cmms-light-surface textarea,
+.cmms-light-surface select,
+.cmms-light-surface option {
+  color: #111827;
+  background-color: #ffffff;
+}
+
+.cmms-light-surface table {
+  color: #1e293b;
+}
+
 @media print {
   /* Hide scrollbars during printing */
   ::-webkit-scrollbar {

@@ -124,6 +124,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::prefix('/custom-pm')->group(function () {
             Route::get('/', [PMModuleController::class, 'indexSupervisor']);
             Route::post('/', [PMModuleController::class, 'store']);
+            Route::patch('/{id}/toggle', [PMModuleController::class, 'toggleStatus']);
+            Route::delete('/{id}', [PMModuleController::class, 'destroy']);
         });
     });
 

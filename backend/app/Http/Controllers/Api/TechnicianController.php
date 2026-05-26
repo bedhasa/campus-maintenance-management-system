@@ -58,6 +58,10 @@ class TechnicianController extends ModuleController
         $query = WorkOrder::query()
             ->where('assigned_to', $user->id)
             ->with([
+                'creator:id,fname,lname,phone,email',
+                'category:id,name',
+                'building:id,name',
+                'room:id,name',
                 'request:id,title,description,priority,status,due_date,created_at,category_id,building_id,room_id,custom_location',
                 'request.category:id,name',
                 'request.building:id,name',
@@ -122,6 +126,10 @@ class TechnicianController extends ModuleController
                     ->count(),
             ],
             'assigned_jobs' => (clone $base)->with([
+                'creator:id,fname,lname,phone,email',
+                'category:id,name',
+                'building:id,name',
+                'room:id,name',
                 'request:id,title,priority,status,due_date,building_id,room_id,custom_location',
                 'request.building:id,name',
                 'request.room:id,name',
@@ -746,6 +754,10 @@ class TechnicianController extends ModuleController
     private function workOrderDetailRelations(): array
     {
         $relations = [
+            'creator:id,fname,lname,phone,email',
+            'category:id,name',
+            'building:id,name',
+            'room:id,name',
             'request:id,title,description,priority,status,due_date,created_at,category_id,asset_id,building_id,room_id,requester_id',
             'request.category:id,name',
             'request.building:id,name',

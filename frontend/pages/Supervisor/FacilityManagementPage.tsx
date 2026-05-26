@@ -28,7 +28,7 @@ export default function FacilityManagementPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   const inputClass =
-    "w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/15";
+    "w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none transition focus:border-[#003366] focus:ring-2 focus:ring-[#003366]/15";
 
   const loadFacilityData = useCallback(async () => {
     const [buildingRes, departmentRes, roomRes] = await Promise.all([
@@ -187,28 +187,30 @@ export default function FacilityManagementPage() {
 
   return (
     <div className="space-y-6 pb-12">
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-500">Supervisor</p>
-        <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Facility Management</h1>
-        <p className="mt-2 text-sm font-semibold text-slate-500">Register and maintain buildings, departments, and assets.</p>
+      {/* Refactored Slim Header with Compact Cards on the Right */}
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Supervisor</p>
+          <h1 className="mt-0.5 text-xl font-black tracking-tight text-slate-900">Facility Management</h1>
+          <p className="mt-0.5 text-xs font-medium text-slate-500">Register and maintain buildings, departments, and assets.</p>
+        </div>
+        
+        {/* Compact Summary Row (Top-Right on Desk/Stacked on Mobile) */}
+        <div className="flex items-center gap-2 self-start sm:self-center">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-1.5 text-center min-w-70px">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Buildings</p>
+            <p className="text-sm font-black text-slate-800">{summary.buildings}</p>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-1.5 text-center min-w-70px">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Depts</p>
+            <p className="text-sm font-black text-slate-800">{summary.departments}</p>
+          </div>
+          <div className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-1.5 text-center min-w-70px">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Rooms</p>
+            <p className="text-sm font-black text-slate-800">{summary.rooms}</p>
+          </div>
+        </div>
       </div>
-
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Buildings</p>
-          <p className="mt-1 text-2xl font-black text-slate-900">{summary.buildings}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Departments</p>
-          <p className="mt-1 text-2xl font-black text-slate-900">{summary.departments}</p>
-        </div>
-      </section>
-      <section className="grid grid-cols-1 gap-3 lg:grid-cols-1">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Rooms</p>
-          <p className="mt-1 text-2xl font-black text-slate-900">{summary.rooms}</p>
-        </div>
-      </section>
 
       {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-semibold text-rose-700">{error}</div> : null}
       {message ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div> : null}

@@ -17,16 +17,20 @@ class PreventiveMaintenancePlan extends Model
         'category_id',
         'frequency_type',
         'frequency_interval',
+        'start_date',
         'next_due_date',
         'priority',
         'estimated_hours',
         'assigned_technician_id',
         'created_by',
         'status',
+        'checklist',
     ];
 
     protected $casts = [
         'next_due_date' => 'date',
+        'start_date' => 'date',
+        'checklist' => 'array',
     ];
 
     public function asset()

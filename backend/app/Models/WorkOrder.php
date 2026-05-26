@@ -13,6 +13,12 @@ class WorkOrder extends Model
         'request_id',
         'created_by',
         'assigned_to',
+        'title',
+        'description',
+        'category_id',
+        'building_id',
+        'room_id',
+        'custom_location',
         'priority',
         'scheduled_date',
         'scheduled_time',
@@ -43,6 +49,21 @@ class WorkOrder extends Model
     public function request()
     {
         return $this->belongsTo(MaintenanceRequest::class, 'request_id');
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(Category::class, 'category_id');
+    }
+
+    public function building()
+    {
+        return $this->belongsTo(Building::class, 'building_id');
+    }
+
+    public function room()
+    {
+        return $this->belongsTo(Room::class, 'room_id');
     }
 
     public function creator()

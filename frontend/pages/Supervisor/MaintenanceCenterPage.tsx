@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
-  Boxes,
   CalendarClock,
   ClipboardPlus,
   MoveRight,
@@ -11,30 +10,23 @@ import {
   RefreshCw,
   Sparkles,
 } from "lucide-react";
-import AssetManagementPage from "./AssetManagementPage";
 import ManualWorkOrderPage from "./ManualWorkOrderPage";
 import PreventiveMaintenancePage from "./PreventiveMaintenancePage";
 
-type HubTab = "manual" | "pm" | "assets";
+type HubTab = "manual" | "pm";
 
 const tabs = [
   {
     id: "manual",
-    label: "Work Orders",
-    description: "Handle corrective maintenance.",
+    label: "Manual WO",
+    description: "Create and assign corrective work.",
     icon: ClipboardPlus,
   },
   {
     id: "pm",
-    label: "Preventive",
+    label: "Preventive Maintenance",
     description: "Manage recurring schedules.",
     icon: CalendarClock,
-  },
-  {
-    id: "assets",
-    label: "Asset Registry",
-    description: "Update equipment & status.",
-    icon: Boxes,
   },
 ] as const;
 
@@ -59,10 +51,13 @@ export default function MaintenanceCenterPage() {
                 <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-900">
                   Manage Operations
                 </h1>
+                <p className="mt-2 text-sm text-slate-500">
+                  Manual work orders and preventive maintenance live here. Asset registration stays in Facility Management.
+                </p>
               </div>
 
               {/* Navigation Tabs (Primary Nav) */}
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-2">
                 {tabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.id;
@@ -114,7 +109,7 @@ export default function MaintenanceCenterPage() {
         {/* Sub-header for the tool */}
         <div className="flex items-center justify-between border-b border-slate-100 p-6">
             <h2 className="text-lg font-black text-slate-900 capitalize">
-                {activeTab === 'pm' ? 'Preventive Schedules' : activeTab === 'assets' ? 'Asset Registry' : 'Corrective Work'}
+                {activeTab === 'pm' ? 'Preventive Schedules' : 'Manual Work Orders'}
             </h2>
             <div className="flex gap-2">
                 {activeTab === 'pm' && (
@@ -128,7 +123,6 @@ export default function MaintenanceCenterPage() {
 
         <div className="p-6">
             {activeTab === "pm" && <PreventiveMaintenancePage embedded />}
-            {activeTab === "assets" && <AssetManagementPage embedded />}
             {activeTab === "manual" && <ManualWorkOrderPage embedded />}
         </div>
       </main>

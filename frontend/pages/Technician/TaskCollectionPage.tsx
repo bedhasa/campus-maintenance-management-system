@@ -107,7 +107,7 @@ export default function TaskCollectionPage({
                       {getTaskTitle(task)}
                     </h2>
                     <p className="mt-2 text-sm text-slate-500 font-medium leading-relaxed">
-                      {task.request?.description || "No description provided."}
+                      {task.request?.description || task.description || "No description provided."}
                     </p>
                   </div>
 
@@ -119,7 +119,7 @@ export default function TaskCollectionPage({
                         <MapPin size={16} />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase">Location</p>
+                        <p className="text-[10px] font-black text-slate-600 uppercase">Location</p>
                         <p className="text-xs font-bold text-slate-900">{getTaskLocation(task)}</p>
                       </div>
                     </div>
@@ -130,11 +130,25 @@ export default function TaskCollectionPage({
                         <Calendar size={16} />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase">Assigned On</p>
+                        <p className="text-[10px] font-black text-slate-600 uppercase">Assigned On</p>
                         <p className="text-xs font-bold text-slate-900">{formatDate(task.created_at)}</p>
                       </div>
                     </div>
                   </div>
+
+                  {task.creator && (
+                    <div className="flex items-center gap-3 bg-blue-50/70 p-3 rounded-2xl border border-blue-100">
+                      <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
+                        <Clock size={16} />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-black text-blue-500 uppercase">Supervisor</p>
+                        <p className="text-xs font-bold text-slate-900">
+                          {[task.creator.fname, task.creator.lname].filter(Boolean).join(" ") || "Supervisor"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Expected Completion Date */}
                   {task.expected_completion_date && (

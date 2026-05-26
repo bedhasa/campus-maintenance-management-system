@@ -634,8 +634,8 @@ export default function WorkOrderDetailPage({ id }: Props) {
   };
 
   const reportedProblemBlock = useMemo(() => {
-    const title = data?.request?.title?.trim();
-    const desc = data?.request?.description?.trim();
+    const title = data?.request?.title?.trim() || data?.title?.trim();
+    const desc = data?.request?.description?.trim() || data?.description?.trim();
     if (!title && !desc) return "No reported problem description.";
     return [title, desc].filter(Boolean).join("\n\n");
   }, [data]);
@@ -670,6 +670,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
     );
   }
 
+  const supervisorName = [data.creator?.fname, data.creator?.lname].filter(Boolean).join(" ").trim() || "Supervisor";
   const requesterName = `${data.request?.requester?.fname || "Unknown"} ${data.request?.requester?.lname || "Requester"}`.trim();
   const requestImages = data.request?.images ?? [];
   const reminders = data.technician_progress_notes ?? [];
@@ -690,7 +691,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
     : "";
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-4">
+    <div className="cmms-light-surface mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-4 text-slate-900">
       <div className="flex items-center justify-between">
         <Link href="/technician/tasks" className="p-2 -ml-2 text-slate-500 transition-colors hover:text-slate-900">
           <ArrowLeft size={24} />
@@ -718,11 +719,11 @@ export default function WorkOrderDetailPage({ id }: Props) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-3">
             <h1 className="text-2xl font-black leading-tight text-slate-900">
-              {data.request?.title || `Work Order #${data.id}`}
+              {data.request?.title || data.title || `Work Order #${data.id}`}
             </h1>
             <div className="flex flex-wrap gap-2">
-              <span className={`rounded-lg border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getPriorityTone(data.request?.priority)}`}>
-                {getPriorityLabel(data.request?.priority)}
+              <span className={`rounded-lg border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${getPriorityTone(data.request?.priority || data.priority)}`}>
+                {getPriorityLabel(data.request?.priority || data.priority)}
               </span>
               <span className={`rounded-lg border px-3 py-1 text-[10px] font-black uppercase tracking-widest ${statusTone}`}>
                 {statusLabel}
@@ -731,7 +732,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
           </div>
 
           <div className="rounded-2xl bg-slate-50 px-4 py-3 text-right">
-            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Assigned On</p>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">Assigned On</p>
             <p className="text-sm font-bold text-slate-900">{formatDate(data.created_at)}</p>
           </div>
         </div>
@@ -758,15 +759,17 @@ export default function WorkOrderDetailPage({ id }: Props) {
       <section className="relative overflow-hidden rounded-[2rem] bg-[#003366] p-6 text-white shadow-xl">
         <div className="relative z-10 flex items-center justify-between gap-4">
           <div className="space-y-1">
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300">Requester Info</p>
-            <h2 className="text-xl font-black tracking-tight">{requesterName}</h2>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-300">
+              {data.request ? "Requester Info" : "Assigned By"}
+            </p>
+            <h2 className="text-xl font-black tracking-tight">{data.request ? requesterName : supervisorName}</h2>
             <p className="font-mono text-sm text-blue-200">
-              {data.request?.requester?.phone || "Phone hidden"}
+              {data.request ? (data.request?.requester?.phone || "Phone hidden") : (data.creator?.phone || data.creator?.email || "Contact hidden")}
             </p>
           </div>
-          {data.request?.requester?.phone ? (
+          {(data.request?.requester?.phone || (!data.request && data.creator?.phone)) ? (
             <a
-              href={`tel:${data.request.requester.phone}`}
+              href={`tel:${data.request?.requester?.phone || data.creator?.phone || ""}`}
               className="rounded-2xl border border-white/10 bg-white/10 p-4 transition-all active:bg-white/20"
             >
               <Phone size={24} fill="currentColor" className="text-white" />
@@ -779,21 +782,21 @@ export default function WorkOrderDetailPage({ id }: Props) {
       </section>
 
       <section className="rounded-[2rem] border border-slate-100 bg-white p-6 shadow-sm">
-        <h3 className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-400">
+        <h3 className="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-600">
           Problem Description
         </h3>
         <p className="text-sm font-medium leading-relaxed text-slate-700">
-          {data.request?.description || "No description provided."}
+          {data.request?.description || data.description || "No description provided."}
         </p>
       </section>
 
       {(data.similar_completion_cases?.length ?? 0) > 0 && (
-        <section className="rounded-[2rem] border border-indigo-100 bg-indigo-50/80 p-6 shadow-sm">
+        <section className="rounded-[2rem] border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
           <div className="mb-4 flex items-center gap-2 text-indigo-800">
             <BookOpen size={18} />
             <h3 className="text-[10px] font-black uppercase tracking-widest">Similar Previous Cases</h3>
           </div>
-          <p className="mb-4 text-xs font-medium text-indigo-900/80">
+          <p className="mb-4 text-xs font-medium text-indigo-950">
             Reference-only history for this asset, category, or matching keywords. Does not change this work order.
           </p>
           <div className="space-y-4">
@@ -805,27 +808,27 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-100 pb-2">
                   <p className="font-black text-slate-900">WO #{c.work_order_id}</p>
                   {c.completed_at ? (
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
                       {formatDateTime(c.completed_at)}
                     </span>
                   ) : null}
                 </div>
                 <dl className="mt-3 space-y-2 text-xs sm:text-sm">
                   <div>
-                    <dt className="font-black uppercase tracking-widest text-slate-400">Previous problem</dt>
+                    <dt className="font-black uppercase tracking-widest text-slate-600">Previous problem</dt>
                     <dd className="mt-1 text-slate-700">{c.previous_problem || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="font-black uppercase tracking-widest text-slate-400">Root cause</dt>
+                    <dt className="font-black uppercase tracking-widest text-slate-600">Root cause</dt>
                     <dd className="mt-1 text-slate-700">{c.root_cause || "—"}</dd>
                   </div>
                   <div>
-                    <dt className="font-black uppercase tracking-widest text-slate-400">Action taken</dt>
+                    <dt className="font-black uppercase tracking-widest text-slate-600">Action taken</dt>
                     <dd className="mt-1 text-slate-700">{c.action_taken || "—"}</dd>
                   </div>
                   {c.spare_parts && c.spare_parts.length > 0 ? (
                     <div>
-                      <dt className="font-black uppercase tracking-widest text-slate-400">Spare parts</dt>
+                      <dt className="font-black uppercase tracking-widest text-slate-600">Spare parts</dt>
                       <dd className="mt-1 text-slate-700">
                         {c.spare_parts.map((p) => (
                           <span key={`${p.name}-${p.quantity_used}`} className="mr-2 inline-block rounded-lg bg-slate-50 px-2 py-0.5">
@@ -861,7 +864,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
       )}
 
       <section className="rounded-[2rem] border border-slate-100 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+        <h3 className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-600">
           Work Order Actions
         </h3>
 
@@ -928,7 +931,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
 
             {data.work_status === "in_progress" && (
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                   Pause Reason
                 </label>
                 <textarea
@@ -994,13 +997,13 @@ export default function WorkOrderDetailPage({ id }: Props) {
             <div className="flex items-center gap-2">
               <Wrench size={18} className="text-emerald-600" />
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">CMMS</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-600">CMMS</p>
                 <h3 className="text-base font-black tracking-tight text-slate-900">
                   Maintenance Completion Report
                 </h3>
               </div>
             </div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 print:text-slate-600">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 print:text-slate-600">
               Work Order #{data.id}
             </p>
           </div>
@@ -1021,7 +1024,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 <>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Reported Problem (original request)
                   </label>
                   <div className="whitespace-pre-wrap rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700 print:border-slate-200">
@@ -1030,7 +1033,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Actual Problem Found
                   </label>
                   <div className="whitespace-pre-wrap min-h-[60px] rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700 print:border-slate-200">
@@ -1039,7 +1042,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Root Cause
                   </label>
                   <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-800 print:border-slate-200">
@@ -1050,7 +1053,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Downtime (hours)
                   </label>
                   <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm font-bold text-slate-900 print:border-slate-200">
@@ -1063,7 +1066,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Diagnostic Steps Taken
                   </label>
                   <ol className="list-decimal space-y-2 rounded-2xl border border-slate-100 bg-slate-50 p-4 pl-8 text-sm text-slate-700 print:border-slate-200">
@@ -1074,13 +1077,13 @@ export default function WorkOrderDetailPage({ id }: Props) {
                       <li key={`${idx}-${step.slice(0, 12)}`}>{step}</li>
                     ))}
                     {!(completionReport?.diagnostic_steps && completionReport.diagnostic_steps.length) && (
-                      <li className="text-slate-400">—</li>
+                      <li className="text-slate-600">—</li>
                     )}
                   </ol>
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Corrective Actions Taken
                   </label>
                   <div className="whitespace-pre-wrap min-h-[80px] rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700 print:border-slate-200">
@@ -1089,7 +1092,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Resolution Summary
                   </label>
                   <div className="whitespace-pre-wrap rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 text-sm font-medium text-emerald-950 print:border-slate-200">
@@ -1100,7 +1103,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
 
               {delayReason ? (
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                     Delay Reason
                   </label>
                   <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900 print:border-slate-200">
@@ -1110,7 +1113,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
               ) : null}
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                   Spare Parts Used
                 </label>
                 {submittedSpareParts.length > 0 ? (
@@ -1124,18 +1127,18 @@ export default function WorkOrderDetailPage({ id }: Props) {
                           <th className="border-b border-slate-200 px-3 py-2">Line total</th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody className="text-slate-800">
                         {submittedSpareParts.map((item) => (
                           <tr key={item.id} className="border-b border-slate-100">
                             <td className="px-3 py-2 font-bold text-slate-900">
                               {item.spare_part?.name || "—"}
-                              <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                              <span className="mt-1 block text-[10px] font-bold uppercase tracking-widest text-slate-600">
                                 {item.spare_part?.part_code || ""}
                               </span>
                             </td>
-                            <td className="px-3 py-2">{item.quantity_used ?? 0}</td>
-                            <td className="px-3 py-2">{formatMoney(item.unit_price)}</td>
-                            <td className="px-3 py-2 font-semibold">{formatMoney(item.total_price)}</td>
+                            <td className="px-3 py-2 text-slate-800">{item.quantity_used ?? 0}</td>
+                            <td className="px-3 py-2 text-slate-800">{formatMoney(item.unit_price)}</td>
+                            <td className="px-3 py-2 font-semibold text-slate-900">{formatMoney(item.total_price)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1162,7 +1165,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
               </div>
 
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-600">
                   Attachments
                 </label>
                 {(() => {
@@ -1221,7 +1224,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
           ) : (
             <div className="space-y-8">
               <div className="space-y-2">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Step 1 — Context</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">Step 1 — Context</p>
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                   Reported Problem (read-only)
                 </label>
@@ -1231,7 +1234,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
               </div>
 
               <div className="space-y-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Step 2 — Findings</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">Step 2 — Findings</p>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                     Actual Problem Found <span className="text-rose-500">*</span>
@@ -1300,7 +1303,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                   <button
                     type="button"
                     onClick={addDiagnosticStep}
-                    className="w-full rounded-2xl border border-dashed border-slate-200 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400"
+                    className="w-full rounded-2xl border border-dashed border-slate-200 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600"
                   >
                     + Add Step
                   </button>
@@ -1308,7 +1311,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
               </div>
 
               <div className="space-y-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Step 3 — Resolution</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">Step 3 — Resolution</p>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                     Corrective Actions Taken <span className="text-rose-500">*</span>
@@ -1336,7 +1339,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                       Downtime (hours)
                     </label>
-                    <p className="text-[10px] text-slate-400">
+                    <p className="text-[10px] text-slate-600">
                       Suggested from request creation to now:{" "}
                       <span className="font-bold text-slate-700">
                         {computedDowntimePreview != null ? computedDowntimePreview : "—"}
@@ -1357,7 +1360,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
               </div>
 
               <div className="space-y-3">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Step 4 — Parts & Evidence</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-600">Step 4 — Parts & Evidence</p>
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                   Spare Parts Used
                 </label>
@@ -1380,7 +1383,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                       <select
                         value={item.spare_part_id}
                         onChange={(e) => updateSparePartRow(index, "spare_part_id", e.target.value)}
-                        className="rounded-xl border-none bg-white px-3 py-2 text-xs font-bold text-slate-900"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-900"
                       >
                         <option value="">Select Part</option>
                         {spareParts.map((part) => (
@@ -1397,7 +1400,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                         min={1}
                         value={item.quantity_used}
                         onChange={(e) => updateSparePartRow(index, "quantity_used", e.target.value)}
-                        className="rounded-xl border-none bg-white px-2 py-2 text-center text-xs font-black text-slate-900"
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-2 text-center text-xs font-black text-slate-900"
                         title="Qty"
                       />
                       <input
@@ -1406,7 +1409,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                         step={0.01}
                         value={item.unit_cost}
                         onChange={(e) => updateSparePartRow(index, "unit_cost", e.target.value)}
-                        className="rounded-xl border-none bg-white px-2 py-2 text-center text-xs font-bold text-slate-900"
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-2 text-center text-xs font-bold text-slate-900"
                         title="Unit cost"
                         placeholder="Unit"
                       />
@@ -1426,7 +1429,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 <button
                   type="button"
                   onClick={addSparePartRow}
-                  className="w-full rounded-2xl border-2 border-dashed border-slate-200 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400"
+                  className="w-full rounded-2xl border-2 border-dashed border-slate-200 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600"
                 >
                   + Add Spare Part
                 </button>
@@ -1438,7 +1441,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                 </label>
                 <label className="flex cursor-pointer flex-col gap-2 rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-600">
                   <div className="flex items-center gap-3">
-                    <Camera size={18} className="shrink-0 text-slate-400" />
+                    <Camera size={18} className="shrink-0 text-slate-600" />
                     <span className="flex-1">Select one or more images</span>
                   </div>
                   <input
@@ -1482,7 +1485,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                   Close Form
                 </button>
               </div>
-              <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              <p className="text-center text-[10px] font-bold uppercase tracking-widest text-slate-600">
                 Draft saves automatically on this device.
               </p>
             </div>
@@ -1494,7 +1497,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
         <section className="rounded-[2rem] border border-amber-100 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center gap-2 text-amber-700">
             <Star size={18} className="fill-current" />
-            <h3 className="text-[10px] font-black uppercase tracking-widest">
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-amber-800">
               Requester Feedback
             </h3>
           </div>
@@ -1510,14 +1513,14 @@ export default function WorkOrderDetailPage({ id }: Props) {
             {data.request.rating.comment || "No written feedback provided."}
           </p>
 
-          <p className="mt-3 text-xs font-bold uppercase tracking-widest text-slate-400">
+          <p className="mt-3 text-xs font-bold uppercase tracking-widest text-slate-600">
             {data.request.rating.requester?.fname || "Requester"} {data.request.rating.requester?.lname || ""} • {formatDateTime(data.request.rating.created_at)}
           </p>
         </section>
       )}
 
       <section className="rounded-[2rem] border border-slate-100 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+        <h3 className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-600">
           Private Progress Reminders
         </h3>
 
@@ -1549,7 +1552,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
                   <p className="text-xs font-black uppercase tracking-widest text-slate-500">
                     Progress #{index + 1}
                   </p>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-600">
                     {formatDateTime(note.created_at)}
                   </span>
                 </div>
@@ -1562,7 +1565,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
 
       {requestImages.length > 0 && (
         <section className="rounded-[2rem] border border-slate-100 bg-white p-6 shadow-sm">
-          <h3 className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-400">
+          <h3 className="mb-4 text-[10px] font-black uppercase tracking-widest text-slate-600">
             Request Images
           </h3>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

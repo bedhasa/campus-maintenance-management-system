@@ -37,7 +37,6 @@ type ReportType =
   | "building_location"
   | "asset_reliability"
   | "spare_parts_usage"
-  | "department_analysis"
   | "technician_performance"
   | "preventive_maintenance";
 
@@ -96,6 +95,7 @@ type AssetPayload = {
     current_condition: string;
     replacement_signal: string;
     average_resolution_time_hours: number;
+    maintenance_cost: number;
   }>;
 };
 
@@ -145,7 +145,7 @@ type TechnicianPayload = {
 
 type PreventivePayload = {
   purpose: string;
-  summary_metrics: { scheduled_pm: number; completed_pm: number; overdue_pm: number; compliance_rate: number };
+  summary_metrics: { scheduled_pm: number; completed_pm: number; overdue_pm: number; compliance_rate: number; total_cost?: number };
   pm_tasks: Array<{
     id: number;
     title: string;
@@ -155,8 +155,10 @@ type PreventivePayload = {
     priority: string;
     frequency: string;
     scheduled_date: string;
+    completed_date?: string;
     technician: string;
     status: string;
+    spare_parts_cost?: number;
   }>;
 };
 
@@ -188,11 +190,10 @@ const reportOptions: Array<{ value: ReportType; label: string; helper: string; i
   { value: "maintenance_summary", label: "Maintenance Summary", helper: "Default overall report with KPIs, charts, and issue drivers.", icon: <BarChart3 size={16} /> },
   { value: "category_analysis", label: "Category Analysis", helper: "Understand the issue types happening most often.", icon: <Layers3 size={16} /> },
   { value: "building_location", label: "Building & Location", helper: "See where problems happen across campus.", icon: <Building2 size={16} /> },
-  { value: "asset_reliability", label: "Asset Reliability", helper: "Track equipment failures, condition, and repair pressure.", icon: <Settings2 size={16} /> },
+  { value: "asset_reliability", label: "Asset Reliability", helper: "Track equipment failures, condition, repair pressure, and maintenance cost.", icon: <Settings2 size={16} /> },
   { value: "spare_parts_usage", label: "Spare Parts Usage", helper: "Review part usage, waste, stock pressure, and cost.", icon: <Wrench size={16} /> },
-  { value: "department_analysis", label: "Department Report", helper: "Rank departments by requests, top issue source, and spend.", icon: <Filter size={16} /> },
   { value: "technician_performance", label: "Technician Performance", helper: "Measure workload, completion, and pending load.", icon: <TrendingUp size={16} /> },
-  { value: "preventive_maintenance", label: "Preventive Maintenance", helper: "Monitor PM schedules, overdue tasks, and compliance.", icon: <CalendarClock size={16} /> },
+  { value: "preventive_maintenance", label: "Preventive Maintenance", helper: "Monitor PM schedules, overdue tasks, compliance, and costs.", icon: <CalendarClock size={16} /> },
 ];
 
 const reportFilterMap: Record<ReportType, Array<"department" | "building" | "category" | "asset">> = {
@@ -201,7 +202,6 @@ const reportFilterMap: Record<ReportType, Array<"department" | "building" | "cat
   building_location: ["department", "building", "category"],
   asset_reliability: ["building", "category", "asset"],
   spare_parts_usage: ["department", "building", "asset"],
-  department_analysis: ["department", "building", "category"],
   technician_performance: ["department", "building", "category", "asset"],
   preventive_maintenance: ["building", "category", "asset"],
 };
@@ -385,10 +385,11 @@ export default function SupervisorReportsPage() {
 
     if (reportType === "asset_reliability") {
       const topAsset = assetPayload?.asset_profiles?.[0];
+      const totalMaintenanceCost = (assetPayload?.asset_profiles ?? []).reduce((sum, a) => sum + (a.maintenance_cost ?? 0), 0);
       return [
         { label: "Failure Events", value: summary.reliability_metrics.failure_events, accent: "bg-rose-50 text-rose-800" },
-        { label: "MTTR", value: `${formatNumber(summary.reliability_metrics.mttr_hours)} hrs`, accent: "bg-sky-50 text-sky-800" },
-        { label: "MTBF", value: `${formatNumber(summary.reliability_metrics.mtbf_hours)} hrs`, accent: "bg-emerald-50 text-emerald-800" },
+        { label: "Assets Tracked", value: assetPayload?.asset_profiles?.length ?? 0, accent: "bg-sky-50 text-sky-800" },
+        { label: "Maintenance Cost", value: formatMoney(totalMaintenanceCost), accent: "bg-emerald-50 text-emerald-800" },
         { label: "Top Failing Asset", value: topAsset?.asset_name ?? "N/A", accent: "bg-slate-100 text-slate-800" },
       ];
     }
@@ -398,7 +399,7 @@ export default function SupervisorReportsPage() {
         { label: "Scheduled PM", value: preventivePayload?.summary_metrics?.scheduled_pm ?? 0, accent: "bg-sky-50 text-sky-800" },
         { label: "Completed PM", value: preventivePayload?.summary_metrics?.completed_pm ?? 0, accent: "bg-emerald-50 text-emerald-800" },
         { label: "Overdue PM", value: preventivePayload?.summary_metrics?.overdue_pm ?? 0, accent: "bg-rose-50 text-rose-800" },
-        { label: "Compliance", value: `${formatPercent(preventivePayload?.summary_metrics?.compliance_rate ?? 0)}%`, accent: "bg-slate-100 text-slate-800" },
+        { label: "Compliance Rate", value: `${formatPercent(preventivePayload?.summary_metrics?.compliance_rate ?? 0)}%`, accent: "bg-slate-100 text-slate-800" },
       ];
     }
 
@@ -825,7 +826,7 @@ export default function SupervisorReportsPage() {
       doc.setFontSize(11);
       doc.text("Top 5 Buildings", 12, cursorY - 1);
       doc.text("Top 5 Departments", 106, cursorY - 1);
-      autoTable(doc, {
+    autoTable(doc, {
         startY: cursorY,
         head: [["Building", "Req Count", "Top Category", "Share %", "Top Room"]],
         body: (analytics?.by_building ?? []).slice(0, 5).map((row) => [
@@ -954,12 +955,12 @@ export default function SupervisorReportsPage() {
       doc.text(currentPdfTable.title, 12, cursorY - 2);
       autoTable(doc, {
         startY: cursorY,
-        head: [currentPdfTable.columns],
-        body: currentPdfTable.rows,
-        theme: "striped",
-        headStyles: { fillColor: [15, 23, 42] },
-        styles: { fontSize: 8 },
-      });
+      head: [currentPdfTable.columns],
+      body: currentPdfTable.rows,
+      theme: "striped",
+      headStyles: { fillColor: [15, 23, 42] },
+      styles: { fontSize: 8 },
+    });
     }
 
     drawPdfFooter(doc);
@@ -1226,7 +1227,7 @@ export default function SupervisorReportsPage() {
           </div>
           <ReportTableCard
             title="Asset Reliability Table"
-            description="Failure count, condition, replacement signal, and average repair time."
+            description="Failure count, condition, replacement signal, maintenance cost, and average repair time."
             rows={assetPayload?.asset_profiles ?? []}
             fileStem="asset-reliability"
             columns={[
@@ -1235,6 +1236,8 @@ export default function SupervisorReportsPage() {
               { key: "repair_history_count", label: "Failures", align: "right" },
               { key: "current_condition", label: "Condition" },
               { key: "replacement_signal", label: "Signal" },
+              { key: "maintenance_cost", label: "Maint. Cost (ETB)", align: "right", exportValue: (row) => formatMoney(row.maintenance_cost ?? 0) },
+              { key: "average_resolution_time_hours", label: "Avg Repair (hrs)", align: "right", exportValue: (row) => formatNumber(row.average_resolution_time_hours) },
             ]}
           />
         </>
@@ -1372,17 +1375,33 @@ export default function SupervisorReportsPage() {
           </div>
           <ReportTableCard
             title="Preventive Maintenance Tasks"
-            description="Scheduled PM work with asset, building, frequency, technician, and status."
+            description="All PM work orders with asset, technician, frequency, scheduled and completion dates, status, and spare parts cost."
             rows={preventivePayload?.pm_tasks ?? []}
             fileStem="preventive-maintenance"
             columns={[
               { key: "title", label: "Task" },
               { key: "asset", label: "Asset" },
               { key: "building", label: "Building" },
-              { key: "frequency", label: "Frequency", exportValue: (row) => humanizeKey(row.frequency) },
+              { key: "priority", label: "Priority", render: (row) => (
+                <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+                  row.priority === "urgent" ? "bg-red-100 text-red-700" :
+                  row.priority === "high" ? "bg-orange-100 text-orange-700" :
+                  row.priority === "medium" ? "bg-amber-100 text-amber-700" :
+                  "bg-slate-100 text-slate-600"
+                }`}>{row.priority}</span>
+              )},
+              { key: "frequency", label: "Frequency", exportValue: (row) => humanizeKey(row.frequency), render: (row) => humanizeKey(row.frequency) },
               { key: "technician", label: "Technician" },
-              { key: "scheduled_date", label: "Scheduled", exportValue: (row) => formatDate(row.scheduled_date) },
-              { key: "status", label: "Status", exportValue: (row) => humanizeKey(row.status) },
+              { key: "scheduled_date", label: "Scheduled", exportValue: (row) => formatDate(row.scheduled_date), render: (row) => formatDate(row.scheduled_date) },
+              { key: "completed_date", label: "Completed", exportValue: (row) => formatDate(row.completed_date), render: (row) => formatDate(row.completed_date) },
+              { key: "status", label: "Status", exportValue: (row) => humanizeKey(row.status), render: (row) => (
+                <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-black uppercase ${
+                  row.status === "completed" ? "bg-emerald-100 text-emerald-700" :
+                  row.status === "overdue" ? "bg-red-100 text-red-700" :
+                  "bg-sky-100 text-sky-700"
+                }`}>{humanizeKey(row.status)}</span>
+              )},
+              { key: "spare_parts_cost", label: "Parts Cost (ETB)", align: "right", exportValue: (row) => formatMoney(row.spare_parts_cost ?? 0), render: (row) => formatMoney(row.spare_parts_cost ?? 0) },
             ]}
           />
         </>
@@ -1703,7 +1722,7 @@ function EmptyState({ copy }: { copy: string }) {
 }
 
 function formatMoney(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
+  return `ETB ${new Intl.NumberFormat("en-ET", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0)}`;
 }
 
 function formatPercent(value: number) {

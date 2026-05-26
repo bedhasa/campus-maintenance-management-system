@@ -9,12 +9,11 @@ import {
   X, ChevronLeft, ChevronRight, MapPin, Tag, Box, 
   Calendar, Clock, User, MessageSquare, Send, 
   Trash2, Edit3, ShieldCheck, CheckCircle2, AlertCircle,
-  HardHat, Phone, Mail, Hash, Layers, Building2, DoorOpen
+  HardHat, Phone, Mail, Hash, Layers, Search
 } from "lucide-react";
 
 interface Props { id: string; initialTab?: "details" | "chat"; }
 
-// Types (Restricted to your provided structure)
 type RequestDetail = {
   id: number; title: string; description: string; status: string; priority: string; created_at: string;
   due_date?: string | null;
@@ -80,7 +79,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   const [reviewing, setReviewing] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const chatRef = useRef<HTMLDivElement | null>(null);
-  // Logic Endpoints (Untouched as per instructions)
+
   const load = useCallback(async () => {
     const res = await apiRequest<{ success: boolean; request: RequestDetail }>(`/api/supervisor/requests/${id}`, { method: "GET" }, true);
     setDetail(res.request);
@@ -141,23 +140,12 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   const getTechnicianState = (tech: TechnicianOption) => {
     const workload = Number(tech.open_workload ?? 0);
     if (workload === 0) {
-      return {
-        label: "Free",
-        badgeClass: "bg-emerald-100 text-emerald-700",
-      };
+      return { label: "Free", badgeClass: "bg-emerald-100 text-emerald-700" };
     }
-
     if (tech.availability === false) {
-      return {
-        label: "Busy",
-        badgeClass: "bg-amber-100 text-amber-700",
-      };
+      return { label: "Busy", badgeClass: "bg-amber-100 text-amber-700" };
     }
-
-    return {
-      label: `${workload} active`,
-      badgeClass: "bg-blue-100 text-blue-700",
-    };
+    return { label: `${workload} active`, badgeClass: "bg-blue-100 text-blue-700" };
   };
 
   const timelineEvents = useMemo(() => {
@@ -195,7 +183,6 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
     return buildStorageUrl(path);
   };
 
-  // Logic Actions
   const sendMessage = async () => {
     if (!newMessage.trim() || chatLocked) return;
     await apiRequest(`/api/supervisor/requests/${id}/messages`, {
@@ -230,15 +217,11 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   };
 
   const review = async (action: "approve" | "reject") => {
-    const comment = action === "reject"
-      ? window.prompt("Enter the rejection reason for the requester:")
-      : undefined;
-
+    const comment = action === "reject" ? window.prompt("Enter the rejection reason for the requester:") : undefined;
     if (action === "reject" && !comment?.trim()) {
       setAssignError("A rejection reason is required.");
       return;
     }
-
     try {
       setReviewing(true);
       setAssignError(null);
@@ -249,9 +232,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       }, true);
       emitRealtimeTopics(buildRequestRealtimeTopics(id), { requestId: id, action: `review.${action}` });
       await load();
-    } finally {
-      setReviewing(false);
-    }
+    } finally { setReviewing(false); }
   };
 
   const undoReview = async () => {
@@ -263,9 +244,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       await load();
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : "Failed to undo review.");
-    } finally {
-      setReviewing(false);
-    }
+    } finally { setReviewing(false); }
   };
 
   const openAssign = async () => {
@@ -284,7 +263,6 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
         true
       );
       const techs = all.technicians ?? [];
-
       setTechnicians(techs);
       setSelectedTechId(techs[0]?.id ? String(techs[0].id) : "");
       setTechSearch("");
@@ -298,9 +276,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : "Failed to load technicians.");
       setAssignOpen(true);
-    } finally {
-      setAssignLoading(false);
-    }
+    } finally { setAssignLoading(false); }
   };
 
   const assignTechnician = async () => {
@@ -331,9 +307,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       await load();
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : "Failed to assign technician.");
-    } finally {
-      setAssigning(false);
-    }
+    } finally { setAssigning(false); }
   };
 
   const updateLifecycle = async (action: "close" | "reopen") => {
@@ -345,15 +319,13 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       await load();
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : `Failed to ${action} request.`);
-    } finally {
-      setLifecycleBusy(false);
-    }
+    } finally { setLifecycleBusy(false); }
   };
 
   if (!detail) return <div className="h-screen flex items-center justify-center font-black text-slate-400 animate-pulse">LOADING...</div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4 animate-in fade-in duration-300">
+    <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-4 animate-in fade-in duration-300 overflow-y-auto max-h-[100vh] scrollbar-hide">
       
       {/* SECTION 1: TOP HEADER & CONTROLS */}
       <div className="bg-white rounded-[1.75rem] border border-slate-100 p-5 md:p-6 shadow-sm">
@@ -370,7 +342,6 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
             <h1 className="text-2xl md:text-3xl font-black text-slate-900 leading-tight">{detail.title}</h1>
           </div>
 
-          {/* Navigation & Action Mix */}
           <div className="flex bg-slate-100 p-1.5 rounded-2xl">
             <button 
               onClick={() => setActiveTab("details")}
@@ -449,6 +420,26 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                   {(!detail.images || detail.images.length === 0) && <p className="text-xs text-slate-400 italic py-8">No images provided for this request.</p>}
                 </div>
               </div>
+
+              {/* TIMELINE / LIFE LOGS */}
+              <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6 flex items-center gap-2">
+                  <Clock size={16} /> Status Timeline
+                </h3>
+                <div className="relative border-l border-slate-100 pl-4 ml-2 space-y-6">
+                  {timelineEvents.map((event, index) => (
+                    <div key={index} className="relative group">
+                      <div className={`absolute -left-[22px] top-0.5 w-3 h-3 rounded-full border-2 border-white ${statusColors[event.new_status] || "bg-slate-400"}`} />
+                      <div className="text-xs">
+                        <span className="font-black text-slate-800 uppercase tracking-wide">{event.new_status}</span>
+                        <span className="text-slate-400 font-medium ml-2">{formatLocalDateTime(event.created_at)}</span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-bold mt-0.5">By: {event.actor}</p>
+                      {event.comment && <p className="text-xs text-slate-600 italic bg-slate-50/50 border border-slate-100 rounded-xl p-2.5 mt-2 max-w-md">{event.comment}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : (
             /* CHAT SECTION */
@@ -481,17 +472,14 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                             />
                             <div className="flex items-center justify-end gap-2">
                               <button
-                                onClick={() => {
-                                  setEditingId(null);
-                                  setEditingText("");
-                                }}
+                                onClick={() => { setEditingId(null); setEditingText(""); }}
                                 className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-black uppercase text-slate-600"
                               >
                                 Cancel
                               </button>
                               <button
                                 onClick={() => void updateMessage(m.id)}
-                                className="rounded-lg bg-[#003366] px-2.5 py-1.5 text-[10px] font-black uppercase text-white"
+                                className="rounded-lg bg-white border border-slate-200 text-[#003366] px-2.5 py-1.5 text-[10px] font-black uppercase"
                               >
                                 Save
                               </button>
@@ -505,10 +493,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                         {isMe && editingId !== m.id && !chatLocked && (
                           <div className="mt-2 flex items-center justify-end gap-2">
                             <button
-                              onClick={() => {
-                                setEditingId(m.id);
-                                setEditingText(m.message);
-                              }}
+                              onClick={() => { setEditingId(m.id); setEditingText(m.message); }}
                               className="rounded-lg bg-slate-100 p-1.5 text-slate-500 hover:bg-slate-200"
                             >
                               <Edit3 size={12} />
@@ -529,7 +514,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                   <div className="flex h-full min-h-[240px] items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-white/70 p-6 text-center">
                     <div>
                       <p className="text-sm font-black text-slate-700">No messages yet</p>
-                      <p className="text-xs text-slate-500 mt-1">Start the conversation with the requester here.</p>
+                      <p className="text-xs text-slate-500 mt-1">Start the conversation here.</p>
                     </div>
                   </div>
                 )}
@@ -591,7 +576,7 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                   <div className="rounded-2xl border border-white/10 bg-white/10 p-4">
                     <p className="text-[9px] font-black uppercase tracking-widest text-blue-200">Final Closure</p>
                     <p className="mt-2 text-xs font-bold text-white/90">
-                      This request was completed by the technician and approved by the requester. Final close or reopen action is taken here by the supervisor.
+                      This request was completed by the technician. Final close or reopen action can be performed here.
                     </p>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -637,191 +622,140 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-black text-slate-900 truncate">{detail.requester?.fname} {detail.requester?.lname}</p>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Employee</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Requester Info</p>
               </div>
             </div>
             <div className="space-y-2">
               <a href={`tel:${detail.requester?.phone}`} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-blue-50 transition-all">
-                <Phone size={14} className="text-blue-500" /> {detail.requester?.phone || "-"}
+                <Phone size={14} className="text-blue-500" /> {detail.requester?.phone || "No Phone"}
               </a>
-              <a href={`mailto:${detail.requester?.email}`} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-blue-50 transition-all truncate">
-                <Mail size={14} className="text-blue-500" /> {detail.requester?.email || "-"}
+              <a href={`mailto:${detail.requester?.email}`} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-blue-50 transition-all break-all">
+                <Mail size={14} className="text-purple-500" /> {detail.requester?.email || "No Email"}
               </a>
             </div>
           </div>
-
-          {isAssigned && (
-            <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-                <HardHat size={16}/> Assigned Technician
-              </h3>
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center text-lg font-black text-[#003366] overflow-hidden">
-                  {assignee?.profile_picture_url ? (
-                    <img src={assignee.profile_picture_url} alt="Technician" className="w-full h-full object-cover rounded-2xl" />
-                  ) : assignee?.fname?.[0] || "T"}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-black text-slate-900 truncate">{assignee?.fname} {assignee?.lname}</p>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Technician</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <a href={`tel:${assignee?.phone ?? ""}`} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-blue-50 transition-all">
-                  <Phone size={14} className="text-blue-500" /> {assignee?.phone || "-"}
-                </a>
-                <a href={`mailto:${assignee?.email ?? ""}`} className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50 text-slate-600 text-xs font-bold hover:bg-blue-50 transition-all truncate">
-                  <Mail size={14} className="text-blue-500" /> {assignee?.email || "-"}
-                </a>
-              </div>
-            </div>
-          )}
-
-          {/* Mini Logs */}
-          <div className="bg-white rounded-[2rem] border border-slate-100 p-5 md:p-6 shadow-sm">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-              <Clock size={16}/> Timeline
-            </h3>
-            <div className="space-y-6 relative before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-[1px] before:bg-slate-100">
-              {timelineEvents.map((log) => (
-                <div key={log.id} className="relative pl-8">
-                  <div className={`absolute left-0 top-1.5 w-5 h-5 rounded-full border-4 border-white shadow-sm ring-1 ring-slate-100 ${statusColors[log.new_status] || 'bg-slate-300'}`} />
-                  <p className="text-[10px] font-black text-slate-900 uppercase">{log.new_status}</p>
-                  <p className="text-[9px] font-bold text-slate-400">{formatLocalDateTime(log.created_at)}</p>
-                  <p className="text-[9px] font-bold text-slate-500">By: {log.actor}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
         </div>
       </div>
 
-      {/* LIGHTBOX (Untouched logic) */}
-      {previewIndex !== null && (
-        <div className="fixed inset-0 z-[9999] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-8" onClick={() => setPreviewIndex(null)}>
-          <button onClick={() => setPreviewIndex(null)} className="absolute top-8 right-8 text-white hover:scale-110 transition-transform"><X size={32} /></button>
-          <img src={resolveImage(detail.images?.[previewIndex]?.image_path)} className="max-w-full max-h-[85vh] rounded-3xl animate-in zoom-in-95 duration-300" alt="Preview" onClick={(e) => e.stopPropagation()} />
-        </div>
-      )}
-
+      {/* POPUP MODAL FIX: Added overflow scroll safeguards and capped operational heights */}
       {assignOpen && (
-        <div className="fixed inset-0 z-[1300] bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setAssignOpen(false)}>
-          <div className="w-full max-w-2xl rounded-[2rem] bg-white border border-slate-100 p-6 space-y-4 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-black text-slate-900">Assign Technician</h3>
-              <button onClick={() => setAssignOpen(false)} className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200">
-                <X size={16} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2.25rem] border border-slate-100 w-full max-w-lg shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b border-slate-100 shrink-0">
+              <div>
+                <h2 className="text-lg font-black text-slate-900">Work Order Dispatch</h2>
+                <p className="text-xs text-slate-400">Deploy technical personnel to task assignments.</p>
+              </div>
+              <button onClick={() => setAssignOpen(false)} className="p-2 text-slate-400 hover:text-slate-600 bg-slate-50 rounded-xl transition-all">
+                <X size={18} />
               </button>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Category Match</p>
-              <p className="mt-1 text-sm font-semibold text-slate-700">{detail.category?.name ?? "General"}</p>
-              <p className="mt-1 text-xs text-slate-500">Choose the technician who best fits this request. Matching staff are listed below.</p>
-            </div>
+            {/* Scrollable Modal Content */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1 scrollbar-hide">
+              {assignLoading ? (
+                <div className="py-12 text-center text-xs font-black text-slate-400 tracking-widest animate-pulse">
+                  FETCHING COMPATIBLE TECHNICIANS...
+                </div>
+              ) : (
+                <>
+                  {/* Technician Selection Block */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Technical Expert</label>
+                    <div className="relative">
+                      <Search className="absolute left-3.5 top-3.5 text-slate-400" size={16} />
+                      <input 
+                        type="text" 
+                        placeholder="Search technicians or specialties..." 
+                        value={techSearch} 
+                        onChange={(e) => setTechSearch(e.target.value)} 
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-10 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-[#003366]/10"
+                      />
+                    </div>
 
-            {assignLoading ? (
-              <p className="text-sm text-slate-500">Loading technicians...</p>
-            ) : (
-              <>
-                <div className="space-y-3">
-                  <input
-                    value={techSearch}
-                    onChange={(e) => setTechSearch(e.target.value)}
-                    placeholder="Search technician by name"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-[#003366]/30 focus:ring-2 focus:ring-[#003366]/10 outline-none"
-                  />
-                  <div className="max-h-72 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
-                    {filteredTechnicians.map((t) => {
-                      const isSelected = selectedTechId === String(t.id);
-                      const fullName = `${t.fname ?? ""} ${t.lname ?? ""}`.trim() || "Unnamed technician";
-                      const techState = getTechnicianState(t);
-                      const workload = Number(t.open_workload ?? 0);
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          onClick={() => setSelectedTechId(String(t.id))}
-                          className={`w-full rounded-2xl border p-4 text-left transition-all ${
-                            isSelected
-                              ? "border-[#003366] bg-blue-50 shadow-sm"
-                              : "border-slate-200 bg-white hover:border-blue-200 hover:bg-blue-50/60"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
+                    <div className="border border-slate-100 rounded-2xl max-h-44 overflow-y-auto bg-slate-50/50 p-1 space-y-1">
+                      {filteredTechnicians.map((tech) => {
+                        const state = getTechnicianState(tech);
+                        const isSelected = selectedTechId === String(tech.id);
+                        return (
+                          <button
+                            key={tech.id}
+                            type="button"
+                            onClick={() => setSelectedTechId(String(tech.id))}
+                            className={`w-full flex items-center justify-between p-3 rounded-xl text-left transition-all ${isSelected ? "bg-white border border-slate-200 shadow-sm" : "hover:bg-white/60"}`}
+                          >
                             <div className="min-w-0">
-                              <p className="text-sm font-black text-slate-900">{fullName}</p>
-                              <p className="mt-1 text-xs text-slate-500">{t.phone || t.email || "No contact info"}</p>
+                              <p className="text-xs font-black text-slate-800">{tech.fname} {tech.lname}</p>
+                              <p className="text-[10px] font-medium text-slate-400 truncate">
+                                {(tech.specialties ?? []).map((s) => s.name).join(", ") || "General Repairs"}
+                              </p>
                             </div>
-                            <div className="shrink-0 flex items-center gap-2">
-                              <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${techState.badgeClass}`}>
-                                {techState.label}
-                              </span>
-                              <span className="text-[11px] font-bold text-slate-500">
-                                {workload} jobs
-                              </span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                    {filteredTechnicians.length === 0 && (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center">
-                        <p className="text-sm font-black text-slate-700">No technician found</p>
-                        <p className="mt-1 text-xs text-slate-500">Try a different search term or review technician specialties.</p>
-                      </div>
-                    )}
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wide ${state.badgeClass}`}>
+                              {state.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {filteredTechnicians.length === 0 && (
+                        <p className="text-xs text-slate-400 text-center py-6 italic">No technicians match search criteria.</p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Priority</p>
-                    <select
-                      value={selectedPriority}
-                      onChange={(e) => setSelectedPriority(e.target.value)}
-                      className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900"
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="urgent">Urgent</option>
-                    </select>
+                  {/* Operational Settings Fields */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Target Due Date</label>
+                      <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Task Priority</label>
+                      <select value={selectedPriority} onChange={(e) => setSelectedPriority(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none">
+                        <option value="low">Low Priority</option>
+                        <option value="medium">Medium Priority</option>
+                        <option value="high">High Priority</option>
+                        <option value="urgent">Urgent</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Start Date</label>
+                      <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Finish Date</label>
+                      <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Due Date</p>
-                    <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Start Date</p>
-                    <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Finish Date</p>
-                    <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Scheduled Time</p>
-                  <input type="time" value={scheduledTime} onChange={(e) => setScheduledTime(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm text-slate-900" />
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
 
-            {assignError && <p className="text-xs font-bold text-rose-600">{assignError}</p>}
-
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setAssignOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-black uppercase">Cancel</button>
-              <button onClick={assignTechnician} disabled={assignLoading || assigning || !selectedTechId} className="px-4 py-2 rounded-xl bg-[#003366] text-white text-xs font-black uppercase disabled:opacity-40">
-                {assigning ? "Assigning..." : "Assign"}
+            {/* Modal Actions Footer */}
+            <div className="p-6 border-t border-slate-100 bg-slate-50/50 shrink-0 flex items-center justify-end gap-3">
+              <button type="button" onClick={() => setAssignOpen(false)} className="px-5 py-3 rounded-xl bg-white border border-slate-200 text-xs font-black uppercase text-slate-600 transition-all">
+                Cancel
+              </button>
+              <button type="button" disabled={assigning || assignLoading || !selectedTechId} onClick={assignTechnician} className="px-6 py-3 rounded-xl bg-[#003366] text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-blue-900/20 transition-all disabled:opacity-40">
+                {assigning ? "Assigning..." : "Confirm Assignment"}
               </button>
             </div>
+
           </div>
         </div>
       )}
+
+      {/* Image Preview Overlay Section */}
+      {previewIndex !== null && detail.images?.[previewIndex] && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
+          <button onClick={() => setPreviewIndex(null)} className="absolute top-6 right-6 p-3 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all">
+            <X size={20} />
+          </button>
+          <img src={resolveImage(detail.images[previewIndex].image_path)} className="max-w-full max-h-[85vh] object-contain rounded-lg" alt="Attachment High Resolution Preview" />
+        </div>
+      )}
+
     </div>
   );
 }

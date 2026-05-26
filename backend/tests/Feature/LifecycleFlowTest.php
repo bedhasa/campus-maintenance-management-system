@@ -296,6 +296,11 @@ class LifecycleFlowTest extends TestCase
 
         Sanctum::actingAs($supervisor, ['role:supervisor']);
         $createResponse = $this->postJson('/api/supervisor/work-orders/manual', [
+            'title' => 'Manual electrical inspection',
+            'description' => 'Inspect breaker panel and tighten loose terminals.',
+            'category_id' => $fixtures['category']->id,
+            'building_id' => $fixtures['building']->id,
+            'room_id' => $fixtures['room']->id,
             'assigned_to' => $technician->id,
             'priority' => 'medium',
             'scheduled_date' => now()->toDateString(),
@@ -324,7 +329,13 @@ class LifecycleFlowTest extends TestCase
         $this->assertDatabaseHas('work_orders', [
             'id' => $workOrderId,
             'request_id' => null,
+            'title' => 'Manual electrical inspection',
             'work_status' => 'completed',
+        ]);
+        $this->assertDatabaseHas('notifications', [
+            'user_id' => $technician->id,
+            'type' => 'manual_work_order_assigned',
+            'related_id' => $workOrderId,
         ]);
 
         Sanctum::actingAs($supervisor, ['role:supervisor']);

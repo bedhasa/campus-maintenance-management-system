@@ -13,6 +13,7 @@ class UserSeeder extends Seeder
     public function run(): void
     {
         $departments = Department::all();
+
         if ($departments->isEmpty()) {
             return;
         }
@@ -24,95 +25,136 @@ class UserSeeder extends Seeder
         $roleAdmin = Role::where('name', 'admin')->first();
 
         $demoUsers = [
+
+            // =====================
+            // ADMIN + SUPERVISOR
+            // =====================
             [
-                'fname' => 'Rita',
-                'lname' => 'Requester',
-                'username' => 'requester.demo',
-                'email' => 'requester@demo.com',
+                'fname' => 'BEDASA',
+                'lname' => 'NEGASH',
+                'username' => 'admin.supervisor',
+                'email' => 'admin@demo.com',
                 'password' => Hash::make('123456'),
-                'university_id_number' => 'U1001001',
-                'dept_id' => $departments->first()->id,
-                'phone' => '555-100-1001',
+                'university_id_number' => 'NaScR/0219/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000001',
+                'roles' => [$roleSupervisor, $roleAdmin],
+            ],
+
+            // =====================
+            // REQUESTERS
+            // =====================
+            [
+                'fname' => 'AYDA',
+                'lname' => 'JEMAL',
+                'username' => 'ayda.requester',
+                'email' => 'ayda@demo.com',
+                'password' => Hash::make('123456'),
+                'university_id_number' => 'NaScR/0203/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000002',
                 'roles' => [$roleRequester],
             ],
             [
-                'fname' => 'Theo',
-                'lname' => 'Technician',
-                'username' => 'technician.demo',
-                'email' => 'technician@demo.com',
+                'fname' => 'HANA',
+                'lname' => 'TESFAYE',
+                'username' => 'hana.requester',
+                'email' => 'hana@demo.com',
                 'password' => Hash::make('123456'),
-                'university_id_number' => 'U1001002',
-                'dept_id' => $departments->first()->id,
-                'phone' => '555-100-1002',
+                'university_id_number' => 'NaScR/0456/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000003',
+                'roles' => [$roleRequester],
+            ],
+
+            // =====================
+            // INVENTORY OFFICERS
+            // =====================
+            [
+                'fname' => 'KENENI',
+                'lname' => 'GEMECHU',
+                'username' => 'keneni.inventory',
+                'email' => 'keneni@demo.com',
+                'password' => Hash::make('123456'),
+                'university_id_number' => 'NaScR/0830/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000004',
+                'roles' => [$roleInventoryOfficer],
+            ],
+
+            // =====================
+            // TECHNICIANS (MANY)
+            // =====================
+            [
+                'fname' => 'ANAOL',
+                'lname' => 'GEMEDO',
+                'username' => 'anaol.tech',
+                'email' => 'anaol@demo.com',
+                'password' => Hash::make('123456'),
+                'university_id_number' => 'NaScR/0169/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000005',
                 'roles' => [$roleTechnician],
             ],
             [
-                'fname' => 'Bdio',
-                'lname' => 'Inventory',
-                'username' => 'bdio',
-                'email' => 'bdio@demo.com',
+                'fname' => 'ATEM',
+                'lname' => 'FAYDU',
+                'username' => 'daniel.tech',
+                'email' => 'daniel@demo.com',
                 'password' => Hash::make('123456'),
-                'university_id_number' => 'U1001006',
-                'dept_id' => $departments->first()->id,
-                'phone' => '555-100-1006',
-                'roles' => [$roleInventoryOfficer],
+                'university_id_number' => 'NaScR/0675/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000006',
+                'roles' => [$roleTechnician],
             ],
             [
-                'fname' => 'Sofia',
-                'lname' => 'Supervisor',
-                'username' => 'supervisor.demo',
-                'email' => 'supervisor@demo.com',
+                'fname' => 'BINIAM',
+                'lname' => 'KASSA',
+                'username' => 'biniam.tech',
+                'email' => 'biniam@demo.com',
                 'password' => Hash::make('123456'),
-                'university_id_number' => 'U1001003',
-                'dept_id' => $departments->first()->id,
-                'phone' => '555-100-1003',
-                'roles' => [$roleSupervisor],
+                'university_id_number' => 'NaScR/0550/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000007',
+                'roles' => [$roleTechnician],
             ],
             [
-                'fname' => 'Alex',
-                'lname' => 'Multi',
-                'username' => 'multi.demo',
-                'email' => 'multi@demo.com',
+                'fname' => 'MULUGETA',
+                'lname' => 'HAILE',
+                'username' => 'mulu.tech',
+                'email' => 'mulu@demo.com',
                 'password' => Hash::make('123456'),
-                'university_id_number' => 'U1001004',
-                'dept_id' => $departments->first()->id,
-                'phone' => '555-100-1004',
-                'roles' => [$roleRequester, $roleTechnician],
+                'university_id_number' => 'NaScR/0888/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000008',
+                'roles' => [$roleTechnician],
             ],
             [
-                'fname' => 'Sam',
-                'lname' => 'OpsAdmin',
-                'username' => 'opsadmin.demo',
-                'email' => 'opsadmin@demo.com',
+                'fname' => 'ABEBE',
+                'lname' => 'KEBEDE',
+                'username' => 'abebe.tech',
+                'email' => 'abebe@demo.com',
                 'password' => Hash::make('123456'),
-                'university_id_number' => 'U1001005',
-                'dept_id' => $departments->first()->id,
-                'phone' => '555-100-1005',
-                'roles' => [$roleSupervisor, $roleAdmin],
+                'university_id_number' => 'NaScR/0999/15',
+                'dept_id' => $departments->random()->id,
+                'phone' => '0911000009',
+                'roles' => [$roleTechnician],
             ],
         ];
 
         foreach ($demoUsers as $data) {
-            $roles = array_filter($data['roles']);
+
+            $roles = $data['roles'];
             unset($data['roles']);
 
-            $user = User::firstOrCreate(['email' => $data['email']], $data);
+            $user = User::firstOrCreate(
+                ['email' => $data['email']],
+                $data
+            );
+
             if (!empty($roles)) {
                 $user->roles()->sync(collect($roles)->pluck('id')->all());
             }
         }
-
-        User::factory()
-            ->count(12)
-            ->state(fn () => ['dept_id' => $departments->random()->id])
-            ->create()
-            ->each(function (User $user) use ($roleRequester, $roleTechnician, $roleInventoryOfficer, $roleSupervisor, $roleAdmin) {
-                $roles = collect([$roleRequester, $roleTechnician, $roleInventoryOfficer, $roleSupervisor, $roleAdmin])
-                    ->filter()
-                    ->random(rand(1, 2))
-                    ->pluck('id')
-                    ->all();
-                $user->roles()->sync($roles);
-            });
     }
 }

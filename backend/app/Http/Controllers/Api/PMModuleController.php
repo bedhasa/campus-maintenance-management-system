@@ -5,12 +5,18 @@ namespace App\Http\Controllers\Api;
 use App\Models\PreventiveMaintenance;
 use App\Models\PreventiveMaintenanceChecklist;
 use App\Models\PreventiveMaintenanceReport;
+use App\Models\PreventiveMaintenancePlan;
+use App\Models\PreventiveMaintenanceSparePart;
+use App\Models\SparePart;
 use App\Models\UserNotification;
 use App\Models\User;
+use App\Services\PMGeneratorService;
+use App\Services\PMNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 class PMModuleController extends ModuleController
 {
@@ -22,13 +28,26 @@ class PMModuleController extends ModuleController
     {
         $this->authorizeRoles($request, ['supervisor', 'admin']);
 
-        $tasks = PreventiveMaintenance::with(['assignee:id,fname,lname', 'creator:id,fname,lname', 'asset:id,name,image_path,serial_number'])
-            ->orderBy('scheduled_date', 'asc')
+        $plans = PreventiveMaintenancePlan::with(['assignee:id,fname,lname', 'creator:id,fname,lname', 'asset:id,name,image_path,serial_number'])
+            ->orderBy('next_due_date', 'asc')
             ->get();
+
+        $history = PreventiveMaintenance::with(['assignee:id,fname,lname', 'asset:id,name,image_path,serial_number', 'report'])
+            ->where('status', 'completed')
+            ->orderBy('updated_at', 'desc')
+            ->get();
+
+        // Map plans to keys the frontend expects to display
+        $mappedPlans = $plans->map(function ($plan) {
+            $plan->scheduled_date = $plan->next_due_date ? $plan->next_due_date->toDateString() : null;
+            $plan->frequency = $plan->frequency_type;
+            return $plan;
+        });
 
         return response()->json([
             'success' => true,
-            'tasks' => $tasks
+            'tasks' => $mappedPlans,
+            'history' => $history
         ]);
     }
 
@@ -49,48 +68,67 @@ class PMModuleController extends ModuleController
             'checklists.*' => 'required|string|max:255',
         ]);
 
-        $pm = DB::transaction(function () use ($validated, $user) {
-            $pm = PreventiveMaintenance::create([
+        $plan = DB::transaction(function () use ($validated, $user) {
+            $asset = \App\Models\Asset::find($validated['asset_id']);
+            
+            $plan = PreventiveMaintenancePlan::create([
                 'asset_id' => $validated['asset_id'],
+                'category_id' => $asset->category_id ?? 1,
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? null,
-                'frequency' => $validated['frequency'],
-                'scheduled_date' => $validated['scheduled_date'],
+                'frequency_type' => $validated['frequency'],
+                'frequency_interval' => 1,
+                'start_date' => $validated['scheduled_date'],
+                'next_due_date' => $validated['scheduled_date'],
                 'priority' => $validated['priority'],
                 'assigned_technician_id' => $validated['assigned_technician_id'],
                 'created_by' => $user->id,
-                'status' => 'assigned',
-                'notes' => $validated['notes'] ?? null,
+                'status' => 'active',
+                'checklist' => $validated['checklists'] ?? [],
             ]);
 
-            if (!empty($validated['checklists'])) {
-                foreach ($validated['checklists'] as $taskDesc) {
-                    PreventiveMaintenanceChecklist::create([
-                        'preventive_maintenance_id' => $pm->id,
-                        'task_description' => $taskDesc,
-                    ]);
-                }
-            }
+            // Immediately generate the first PM work order instance
+            $pm = PMGeneratorService::generateInitialWorkOrder($plan);
 
-            return $pm;
+            // Advance the plan template next due date
+            $plan->next_due_date = $plan->calculateNextDueDate()->toDateString();
+            $plan->save();
+
+            return $plan;
         });
-
-        // Notify Technician
-        UserNotification::create([
-            'user_id' => $pm->assigned_technician_id,
-            'recipient_role' => 'technician',
-            'type' => 'pm_assigned',
-            'module' => 'preventive_maintenance',
-            'related_id' => $pm->id,
-            'message' => "You have been assigned a new PM Task: {$pm->title}",
-            'is_read' => false,
-        ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Preventive Maintenance schedule created and assigned successfully.',
-            'task' => $pm->load(['checklists', 'asset'])
+            'message' => 'Preventive Maintenance plan created and initial work order generated successfully.',
+            'task' => $plan->load(['asset', 'assignee'])
         ], 201);
+    }
+
+    public function toggleStatus(Request $request, int $id): JsonResponse
+    {
+        $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $plan = PreventiveMaintenancePlan::findOrFail($id);
+        
+        $plan->status = $plan->status === 'active' ? 'paused' : 'active';
+        $plan->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Preventive Maintenance plan status updated successfully.',
+            'plan' => $plan
+        ]);
+    }
+
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        $this->authorizeRoles($request, ['supervisor', 'admin']);
+        $plan = PreventiveMaintenancePlan::findOrFail($id);
+        $plan->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Preventive Maintenance plan deleted successfully.'
+        ]);
     }
 
     // -----------------------------------------------------
@@ -131,7 +169,7 @@ class PMModuleController extends ModuleController
     public function showTechnician(Request $request, int $id): JsonResponse
     {
         $user = $this->authorizeRoles($request, ['technician']);
-        $task = PreventiveMaintenance::with(['checklists', 'report', 'asset:id,name,image_path,serial_number,status'])
+        $task = PreventiveMaintenance::with(['checklists', 'report', 'asset:id,name,image_path,serial_number,status', 'spareParts.sparePart'])
             ->where('assigned_technician_id', $user->id)
             ->findOrFail($id);
 
@@ -191,6 +229,9 @@ class PMModuleController extends ModuleController
             'completion_notes' => 'nullable|string',
             'before_image' => 'nullable|image|max:4096',
             'after_image' => 'nullable|image|max:4096',
+            'spare_parts' => 'sometimes|array',
+            'spare_parts.*.spare_part_id' => 'required|integer|exists:spare_parts,id',
+            'spare_parts.*.quantity_used' => 'required|integer|min:1',
         ]);
 
         DB::transaction(function () use ($validated, $task, $request, $user) {
@@ -204,11 +245,47 @@ class PMModuleController extends ModuleController
                 $afterPath = $request->file('after_image')->store('pm-images', 'public');
             }
 
+            // Verify and consumption of spare parts
+            $partsUsedSummaryList = [];
+            foreach ($validated['spare_parts'] ?? [] as $partUsage) {
+                $part = SparePart::findOrFail($partUsage['spare_part_id']);
+                $qty = (int) $partUsage['quantity_used'];
+
+                if ($part->quantity_available < $qty) {
+                    throw ValidationException::withMessages([
+                        'spare_parts' => ["Insufficient stock for spare part: {$part->name}. Available: {$part->quantity_available}."]
+                    ]);
+                }
+
+                $part->decrement('quantity_available', $qty);
+
+                PreventiveMaintenanceSparePart::create([
+                    'preventive_maintenance_id' => $task->id,
+                    'spare_part_id' => $part->id,
+                    'quantity_used' => $qty,
+                    'unit_price' => $part->unit_price ?? 0,
+                    'total_price' => ($part->unit_price ?? 0) * $qty,
+                ]);
+
+                $partsUsedSummaryList[] = "{$qty}x {$part->name}";
+            }
+
+            // Build or append to parts_used summary string
+            $partsUsedSummary = $validated['parts_used'];
+            if (!empty($partsUsedSummaryList)) {
+                $invPartsStr = implode(', ', $partsUsedSummaryList);
+                if (empty($partsUsedSummary)) {
+                    $partsUsedSummary = "Inventory parts: " . $invPartsStr;
+                } else {
+                    $partsUsedSummary .= " (Inventory parts: " . $invPartsStr . ")";
+                }
+            }
+
             PreventiveMaintenanceReport::create([
                 'preventive_maintenance_id' => $task->id,
                 'condition_before' => $validated['condition_before'] ?? null,
                 'work_performed' => $validated['work_performed'],
-                'parts_used' => $validated['parts_used'] ?? null,
+                'parts_used' => $partsUsedSummary ?? null,
                 'recommendations' => $validated['recommendations'] ?? null,
                 'completion_notes' => $validated['completion_notes'] ?? null,
                 'before_image_path' => $beforePath,
@@ -217,22 +294,22 @@ class PMModuleController extends ModuleController
 
             $task->update(['status' => 'completed']);
 
-            // Notify Supervisor
-            UserNotification::create([
-                'user_id' => $task->created_by,
-                'recipient_role' => 'supervisor',
-                'type' => 'pm_completed',
-                'module' => 'preventive_maintenance',
-                'related_id' => $task->id,
-                'message' => "PM Task '{$task->title}' has been completed by " . $user->fname . ".",
-                'is_read' => false,
-            ]);
+            // Notify Supervisor (both in-app and email)
+            PMNotificationService::notifyPMCompleted($task, $user);
+
+            // Automatically prepare/generate next scheduled work order
+            if ($task->plan_id) {
+                $plan = PreventiveMaintenancePlan::find($task->plan_id);
+                if ($plan) {
+                    PMGeneratorService::generateNextWorkOrder($plan);
+                }
+            }
         });
 
         return response()->json([
             'success' => true,
-            'message' => 'PM Task completed successfully.',
-            'task' => $task->fresh(['checklists', 'report'])
+            'message' => 'PM Task completed successfully and next cycle scheduled.',
+            'task' => $task->fresh(['checklists', 'report', 'spareParts.sparePart'])
         ]);
     }
 }

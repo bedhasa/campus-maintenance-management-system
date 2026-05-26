@@ -42,4 +42,14 @@ class PreventiveMaintenance extends Model
     {
         return $this->hasOne(PreventiveMaintenanceReport::class, 'preventive_maintenance_id');
     }
+
+    public function plan(): BelongsTo
+    {
+        return $this->belongsTo(PreventiveMaintenancePlan::class, 'plan_id');
+    }
+
+    public function spareParts(): HasMany
+    {
+        return $this->hasMany(PreventiveMaintenanceSparePart::class, 'preventive_maintenance_id');
+    }
 }

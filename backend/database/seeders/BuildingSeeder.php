@@ -11,14 +11,29 @@ class BuildingSeeder extends Seeder
     public function run(): void
     {
         $data = [
-            'Main Library' => ['101', '102', '201', '202'],
-            'Engineering Block A' => ['A-01', 'A-02', 'A-101', 'A-102'],
-            'ICT Center' => ['Lab-1', 'Lab-2', 'Server Room'],
-            'Administration' => ['Reception', 'Office-1', 'Office-2'],
+            'Main Library' => [
+                'Reading Room 1',
+                'Reading Room 2',
+                'Computer Lab',
+                'Staff Office'
+            ],
+
+            'Informatics Building' => [
+                'Lab-1',
+                'Lab-2',
+                'Network Room',
+                'Classroom-101',
+                'Classroom-102'
+            ],
+
+            'Block 1 Dorm' => [],
         ];
 
+        // Create buildings and normal rooms
         foreach ($data as $buildingName => $rooms) {
-            $building = Building::firstOrCreate(['name' => $buildingName]);
+            $building = Building::firstOrCreate([
+                'name' => $buildingName
+            ]);
 
             foreach ($rooms as $roomName) {
                 Room::firstOrCreate([
@@ -27,6 +42,15 @@ class BuildingSeeder extends Seeder
                 ]);
             }
         }
+
+        // Generate Dorm_1 to Dorm_415
+        $dormBuilding = Building::where('name', 'Block 1 Dorm')->first();
+
+        for ($i = 1; $i <= 415; $i++) {
+            Room::firstOrCreate([
+                'building_id' => $dormBuilding->id,
+                'name' => 'Dorm_' . $i,
+            ]);
+        }
     }
 }
-
