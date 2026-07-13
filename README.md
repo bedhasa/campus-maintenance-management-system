@@ -173,3 +173,36 @@ Hawassa University
 2026
 
 ---
+
+## Screenshots
+
+### Login Page
+
+![Login Page](screenshots/login.png)
+
+---
+
+### Dashboard
+
+![Dashboard](screenshots/sup_dashboard.png)
+
+---
+
+### Requester Dashboard
+
+![Report Request](screenshots/reqdashboard.png)
+![da](screenshots/detpage.png)
+
+---
+
+### Technician Dashboard
+
+![Technician Dashboard](screenshots/tech.png)
+
+---
+
+### Report Page
+
+![Report page](screenshots/reportpage.png)
+
+
