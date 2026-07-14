@@ -16,6 +16,8 @@ class SparePart extends Model
         'part_code',
         'unit_price',
         'quantity_available',
+        'unit',
+        'category',
         'minimum_stock',
         'image_path',
     ];
@@ -37,5 +39,10 @@ class SparePart extends Model
     public function partIssues()
     {
         return $this->hasMany(PartIssue::class, 'part_id');
+    }
+
+    public function sparePartRequestItems()
+    {
+        return $this->hasMany(SparePartRequestItem::class, 'spare_part_id');
     }
 }

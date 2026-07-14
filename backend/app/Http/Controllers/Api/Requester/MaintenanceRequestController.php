@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Requester;
 
 use App\Models\MaintenanceRequest;
+use App\Models\Category;
 use App\Models\RequestImage;
 use App\Models\RequestMessage;
 use App\Models\RequestStatusLog;
@@ -176,7 +177,8 @@ class MaintenanceRequestController extends RequesterController
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:150'],
             'description' => ['required', 'string'],
-            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
+            'custom_category' => ['nullable', 'string', 'max:120'],
             'building_id' => ['nullable', 'integer', 'exists:buildings,id'],
             'room_id' => ['nullable', 'integer', 'exists:rooms,id'],
             'custom_location' => ['nullable', 'string', 'max:255'],
@@ -184,8 +186,25 @@ class MaintenanceRequestController extends RequesterController
             'priority' => ['required', 'in:low,medium,high,urgent'],
         ]);
 
+        if (empty($validated['category_id']) && empty(trim((string) ($validated['custom_category'] ?? '')))) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select a category or enter a custom category.',
+            ], 422);
+        }
+
+        $validated['category_id'] = $this->resolveCategoryId(
+            $validated['category_id'] ?? null,
+            $validated['custom_category'] ?? null
+        );
+
+        $payload = $validated;
+        if (!Schema::hasColumn('maintenance_requests', 'custom_category')) {
+            unset($payload['custom_category']);
+        }
+
         $ticket = MaintenanceRequest::create([
-            ...$validated,
+            ...$payload,
             'requester_id' => $user->id,
             'department_id' => $user->dept_id,
             'status' => 'submitted',
@@ -239,7 +258,8 @@ class MaintenanceRequestController extends RequesterController
         $validated = $request->validate([
             'title' => ['sometimes', 'string', 'max:150'],
             'description' => ['sometimes', 'string'],
-            'category_id' => ['sometimes', 'integer', 'exists:categories,id'],
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
+            'custom_category' => ['nullable', 'string', 'max:120'],
             'building_id' => ['nullable', 'integer', 'exists:buildings,id'],
             'room_id' => ['nullable', 'integer', 'exists:rooms,id'],
             'custom_location' => ['nullable', 'string', 'max:255'],
@@ -247,10 +267,29 @@ class MaintenanceRequestController extends RequesterController
             'priority' => ['sometimes', 'in:low,medium,high,urgent'],
         ]);
 
+        $nextCategory = array_key_exists('category_id', $validated) ? $validated['category_id'] : $ticket->category_id;
+        $nextCustomCategory = array_key_exists('custom_category', $validated) ? trim((string) ($validated['custom_category'] ?? '')) : trim((string) ($ticket->custom_category ?? ''));
+        if (empty($nextCategory) && $nextCustomCategory === '') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please select a category or enter a custom category.',
+            ], 422);
+        }
+
+        if (array_key_exists('category_id', $validated) || array_key_exists('custom_category', $validated)) {
+            $validated['category_id'] = $this->resolveCategoryId(
+                $validated['category_id'] ?? null,
+                $validated['custom_category'] ?? null
+            );
+        }
+
         $previousStatus = $ticket->status;
         $isResubmission = in_array($previousStatus, ['rejected', 'cancelled'], true);
 
         $updatePayload = $validated;
+        if (!Schema::hasColumn('maintenance_requests', 'custom_category')) {
+            unset($updatePayload['custom_category']);
+        }
         if ($isResubmission) {
             $updatePayload['status'] = 'submitted';
         }
@@ -278,6 +317,17 @@ class MaintenanceRequestController extends RequesterController
             'message' => $isResubmission ? 'Request updated and resubmitted.' : 'Request updated.',
             'request' => $ticket->fresh()->load(['category:id,name', 'building:id,name', 'room:id,name']),
         ]);
+    }
+
+    private function resolveCategoryId(?int $categoryId, ?string $customCategory): int
+    {
+        if (!empty($categoryId)) {
+            return (int) $categoryId;
+        }
+
+        $fallbackName = trim((string) $customCategory) !== '' ? trim((string) $customCategory) : 'Other';
+        $category = Category::query()->firstOrCreate(['name' => $fallbackName]);
+        return (int) $category->id;
     }
 
     public function cancel(Request $request, int $id): JsonResponse

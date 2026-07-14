@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { NavLink } from '../lib/router-dom-shim';
 import { 
   LayoutDashboard, 
@@ -12,15 +12,17 @@ import {
   LogOut,
   Settings,
   History,
-  Activity,
   Bell,
   HelpCircle,
   X,
-  Users
+  Users,
+  ShoppingCart,
+  Activity
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { useApp } from '../App';
 import { normalizeUserRoles, roleToBasePath } from '../lib/role-routes';
+import { apiRequest } from '../lib/api';
 
 interface SidebarProps {
   role: UserRole;
@@ -31,6 +33,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) => {
   const { notifications, currentUser, t } = useApp();
+  const [apiUnreadCount, setApiUnreadCount] = useState<number | null>(null);
   const accessibleRoles = new Set(
     normalizeUserRoles([currentUser?.role, ...(currentUser?.roles ?? [])]),
   );
@@ -46,13 +49,34 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
     return true;
   });
   
-  const unreadCount = relevantNotifications.filter(n => !n.read).length;
+  const unreadFallbackCount = relevantNotifications.filter(n => !n.read).length;
+  const unreadCount = apiUnreadCount ?? unreadFallbackCount;
   const basePath = roleToBasePath(role);
   const hasAdminRole = !!currentUser?.roles?.includes('admin') || role === 'admin';
   const hasSupervisorRole = !!currentUser?.roles?.includes('supervisor') || role === 'supervisor';
   const hasSupervisorAdminAccess = hasSupervisorRole && hasAdminRole;
   const dashboardPath =
     role === 'admin' && hasSupervisorAdminAccess ? '/supervisor/dashboard' : `${basePath}/dashboard`;
+
+  const fetchUnreadCount = useMemo(() => async () => {
+    try {
+      const data = await apiRequest<{ success: boolean; notifications: { data: Array<{ is_read: boolean }> } }>(
+        "/api/me/notifications",
+        { method: "GET" },
+        true
+      );
+      const unread = (data.notifications?.data ?? []).filter((n) => !n.is_read).length;
+      setApiUnreadCount(unread);
+    } catch {
+      // Keep UI usable with local fallback count.
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchUnreadCount();
+    const timer = window.setInterval(() => { void fetchUnreadCount(); }, 30000);
+    return () => window.clearInterval(timer);
+  }, [fetchUnreadCount]);
 
   const getNavItems = () => {
     const base: Array<{
@@ -91,7 +115,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
         base.push(
           { name: 'Dashboard', path: '/technician/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Task summary" },
           { name: 'My Tasks', path: '/technician/tasks', icon: <ClipboardList size={18} />, tooltip: "Assigned jobs" },
-          { name: 'In Progress', path: '/technician/in-progress', icon: <Activity size={18} />, tooltip: "Active work" },
+          { name: 'Spare Part Requests', path: '/technician/spare-part-requests', icon: <ShoppingCart size={18} />, tooltip: "Request inventory parts" },
           { name: 'History', path: '/technician/history', icon: <History size={18} />, tooltip: "Submitted and closed work" },
           { name: 'Delayed Tasks', path: '/technician/delayed', icon: <Calendar size={18} />, tooltip: "Overdue and delayed jobs" },
         );
@@ -100,6 +124,7 @@ const Sidebar: React.FC<SidebarProps> = ({ role, onLogout, isOpen, onClose }) =>
         base.push(
           { name: t('dashboard'), path: '/inventory/dashboard', icon: <LayoutDashboard size={18} />, tooltip: "Stock summary" },
           { name: 'Spare Parts Management', path: '/inventory/list', icon: <Package size={18} />, tooltip: "Manage parts and stock" },
+          { name: 'Spare Part Requests', path: '/inventory/spare-part-requests', icon: <ShoppingCart size={18} />, tooltip: "Review technician requests" },
           { name: 'Record Requests', path: '/inventory/record-request', icon: <FilePlus size={18} />, tooltip: "Capture technician demand" },
           { name: 'Issue History', path: '/inventory/issue-history', icon: <History size={18} />, tooltip: "Issued stock records" },
           { name: 'Reports', path: '/inventory/reports', icon: <Activity size={18} />, tooltip: "Demand and usage reports" },

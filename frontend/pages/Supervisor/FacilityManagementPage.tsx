@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { apiRequest } from "@/lib/api";
-import { Building2, Save, PlusCircle, PencilLine, Layers3, DoorOpen, X } from "lucide-react";
+import { Building2, Save, PlusCircle, PencilLine, Layers3, DoorOpen, X, Search } from "lucide-react";
 import AssetManagementPage from "./AssetManagementPage";
 
 type Building = { id: number; name: string; created_at?: string };
@@ -19,6 +19,7 @@ export default function FacilityManagementPage() {
   const [departmentName, setDepartmentName] = useState("");
   const [departmentFaculty, setDepartmentFaculty] = useState("");
   const [roomName, setRoomName] = useState("");
+  const [roomSearch, setRoomSearch] = useState("");
   const [pendingRooms, setPendingRooms] = useState<string[]>([]);
   const [editingBuildingId, setEditingBuildingId] = useState<number | null>(null);
   const [editingDepartmentId, setEditingDepartmentId] = useState<number | null>(null);
@@ -175,8 +176,13 @@ export default function FacilityManagementPage() {
 
   const buildingRooms = useMemo(() => {
     if (!editingBuildingId) return [];
-    return rooms.filter((room) => room.building_id === editingBuildingId);
-  }, [editingBuildingId, rooms]);
+    const matched = rooms.filter((room) => room.building_id === editingBuildingId);
+    if (!roomSearch.trim()) {
+      return matched.slice(0, 5);
+    }
+    const term = roomSearch.trim().toLowerCase();
+    return matched.filter((room) => room.name.toLowerCase().includes(term));
+  }, [editingBuildingId, rooms, roomSearch]);
 
   const addPendingRoom = () => {
     const trimmed = roomName.trim();
@@ -280,6 +286,20 @@ export default function FacilityManagementPage() {
                 </div>
               ) : (
                 <div className="mt-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <Search size={14} className="text-slate-400" />
+                    <input
+                      className={inputClass}
+                      value={roomSearch}
+                      onChange={(e) => setRoomSearch(e.target.value)}
+                      placeholder="Search room to edit..."
+                    />
+                  </div>
+                  {!roomSearch.trim() && (
+                    <p className="mb-2 text-[11px] font-bold text-slate-500">
+                      Showing top 5 rooms. Use search to find other rooms.
+                    </p>
+                  )}
                   <SimpleTable
                     title="Rooms for this Building"
                     icon={<DoorOpen size={16} />}

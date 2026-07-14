@@ -73,7 +73,9 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
   const [startDate, setStartDate] = useState("");
   const [finishDate, setFinishDate] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [scheduledTime, setScheduledTime] = useState("");
+  const [scheduledStartTime, setScheduledStartTime] = useState("");
+  const [scheduledEndTime, setScheduledEndTime] = useState("");
+  const [scheduleNote, setScheduleNote] = useState("");
   const [selectedPriority, setSelectedPriority] = useState("medium");
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -249,16 +251,14 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
 
   const openAssign = async () => {
     const resolvedCategoryId = detail?.category_id ?? detail?.category?.id ?? null;
-    if (!resolvedCategoryId) {
-      setAssignError("This request has no category. Set category first.");
-      setAssignOpen(true);
-      return;
-    }
+    const isOtherCategory = !resolvedCategoryId;
     try {
       setAssignLoading(true);
       setAssignError(null);
       const all = await apiRequest<{ success: boolean; technicians: TechnicianOption[] }>(
-        `/api/supervisor/technicians/by-category?category_id=${resolvedCategoryId}`,
+        isOtherCategory
+          ? `/api/supervisor/technicians/by-category?all=1`
+          : `/api/supervisor/technicians/by-category?category_id=${resolvedCategoryId}`,
         { method: "GET" },
         true
       );
@@ -268,10 +268,12 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
       setTechSearch("");
       setStartDate("");
       setFinishDate("");
-      setScheduledTime("");
+      setScheduledStartTime("");
+      setScheduledEndTime("");
+      setScheduleNote("");
       setDueDate(detail?.due_date ? detail.due_date.slice(0, 10) : "");
       setSelectedPriority(detail?.priority ?? "medium");
-      if (techs.length === 0) setAssignError("No technicians found for this category.");
+      if (techs.length === 0) setAssignError(isOtherCategory ? "No technicians found." : "No technicians found for this category.");
       setAssignOpen(true);
     } catch (error) {
       setAssignError(error instanceof Error ? error.message : "Failed to load technicians.");
@@ -295,7 +297,11 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
           start_date: startDate || null,
           finish_date: finishDate || null,
           due_date: dueDate || null,
-          scheduled_time: scheduledTime || null,
+          scheduled_start_date: startDate || null,
+          scheduled_end_date: finishDate || null,
+          scheduled_start_time: scheduledStartTime || null,
+          scheduled_end_time: scheduledEndTime || null,
+          schedule_note: scheduleNote || null,
           priority: selectedPriority || null,
         }),
       }, true);
@@ -726,6 +732,18 @@ export default function RequestDetailPage({ id, initialTab = "details" }: Props)
                     <div className="space-y-1.5">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Finish Date</label>
                       <input type="date" value={finishDate} onChange={(e) => setFinishDate(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Start Time</label>
+                      <input type="time" value={scheduledStartTime} onChange={(e) => setScheduledStartTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">End Time</label>
+                      <input type="time" value={scheduledEndTime} onChange={(e) => setScheduledEndTime(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" />
+                    </div>
+                    <div className="space-y-1.5 col-span-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Schedule Note</label>
+                      <textarea value={scheduleNote} onChange={(e) => setScheduleNote(e.target.value)} className="w-full min-h-[72px] bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-800 outline-none" placeholder="Optional instructions for visit or access" />
                     </div>
                   </div>
                 </>

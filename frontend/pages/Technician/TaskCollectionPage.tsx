@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, Calendar, Clock, ChevronRight, PlayCircle } from "lucide-react";
 import { apiRequest } from "@/lib/api";
 import { ListSkeleton } from "@/components/PageSkeleton";
@@ -29,6 +29,7 @@ export default function TaskCollectionPage({
   const [items, setItems] = useState<TechnicianWorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [priorityFilter, setPriorityFilter] = useState<"all" | "urgent" | "high" | "medium" | "low">("all");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -54,8 +55,20 @@ export default function TaskCollectionPage({
   useEffect(() => { void load(); }, [load]);
   useLiveRefresh(() => load(true), { enabled: true, intervalMs: 8000 });
 
+  const sortedItems = useMemo(() => {
+    const list = [...items];
+    list.sort((a, b) => {
+      const aTime = new Date(a.created_at ?? "").getTime();
+      const bTime = new Date(b.created_at ?? "").getTime();
+      const safeA = Number.isFinite(aTime) ? aTime : 0;
+      const safeB = Number.isFinite(bTime) ? bTime : 0;
+      return sortOrder === "newest" ? safeB - safeA : safeA - safeB;
+    });
+    return list;
+  }, [items, sortOrder]);
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6 pb-20 px-4">
+    <div className="mx-auto w-full max-w-5xl space-y-6 pb-20 px-3 sm:px-4">
       {/* Simple Header */}
       <header className="py-6">
         <h1 className="text-3xl font-black text-slate-900 tracking-tight">{title}</h1>
@@ -77,13 +90,24 @@ export default function TaskCollectionPage({
             {priority === "all" ? "All priorities" : priority}
           </button>
         ))}
+        <div className="ml-auto flex items-center gap-2">
+          <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Sort</label>
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as "newest" | "oldest")}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-widest text-slate-700"
+          >
+            <option value="newest">New to old</option>
+            <option value="oldest">Old to new</option>
+          </select>
+        </div>
       </div>
 
       {loading ? (
         <ListSkeleton rows={3} />
       ) : (
         <div className="space-y-4">
-          {items.map((task) => {
+          {sortedItems.map((task) => {
             const isPriority = task.request?.priority === "urgent" || task.request?.priority === "high";
             
             return (
@@ -136,19 +160,25 @@ export default function TaskCollectionPage({
                     </div>
                   </div>
 
-                  {task.creator && (
-                    <div className="flex items-center gap-3 bg-blue-50/70 p-3 rounded-2xl border border-blue-100">
-                      <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
-                        <Clock size={16} />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-blue-500 uppercase">Supervisor</p>
-                        <p className="text-xs font-bold text-slate-900">
-                          {[task.creator.fname, task.creator.lname].filter(Boolean).join(" ") || "Supervisor"}
-                        </p>
-                      </div>
+                  {/* Expected Completion Date */}
+                  {(task.scheduled_start_date || task.scheduled_end_date) && (
+                    <div className="flex items-center gap-3 bg-indigo-50/60 p-3 rounded-2xl border border-indigo-100">
+                      <Clock size={16} className="text-indigo-600" />
+                      <p className="text-xs font-bold text-indigo-900">
+                        Scheduled:{" "}
+                        <span className="font-black">
+                          {task.scheduled_start_date ?? "-"} {task.scheduled_start_time ?? ""}
+                          {"  "}to{"  "}
+                          {task.scheduled_end_date ?? "-"} {task.scheduled_end_time ?? ""}
+                        </span>
+                      </p>
                     </div>
                   )}
+                  {task.schedule_note ? (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-700">
+                      Note: {task.schedule_note}
+                    </div>
+                  ) : null}
 
                   {/* Expected Completion Date */}
                   {task.expected_completion_date && (

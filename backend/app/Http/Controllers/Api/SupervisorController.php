@@ -11,6 +11,7 @@ use App\Models\Building;
 use App\Models\Category;
 use App\Models\Department;
 use App\Models\PartIssue;
+use App\Models\SparePartRequestItem;
 use App\Support\SimilarCompletionCases;
 use App\Models\SparePart;
 use App\Models\User;
@@ -27,9 +28,13 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class SupervisorController extends ModuleController
 {
+    /** @var array<string, bool> */
+    private array $workOrderColumnCache = [];
+
     public function dashboard(Request $request): JsonResponse
     {
         $user = $this->authorizeRoles($request, ['supervisor', 'admin']);
@@ -209,6 +214,7 @@ class SupervisorController extends ModuleController
         $validated = $request->validate([
             'status' => ['nullable', 'string'],
             'priority' => ['nullable', 'in:low,medium,high,urgent'],
+            'urgent_unapproved' => ['nullable', 'boolean'],
             'search' => ['nullable', 'string', 'max:150'],
         ]);
 
@@ -229,6 +235,11 @@ class SupervisorController extends ModuleController
         }
         if (!empty($validated['priority'])) {
             $query->where('priority', $validated['priority']);
+        }
+        if (!empty($validated['urgent_unapproved'])) {
+            $query
+                ->where('priority', 'urgent')
+                ->whereNotIn('status', ['approved', 'assigned', 'in_progress', 'completed', 'closed']);
         }
         if (!empty($validated['search'])) {
             $search = $validated['search'];
@@ -377,8 +388,8 @@ class SupervisorController extends ModuleController
     {
         $this->authorizeRoles($request, ['supervisor', 'admin']);
         $validated = $request->validate([
-            'status' => ['nullable', 'in:assigned,in_progress,completed,draft'],
-            'filter' => ['nullable', 'in:overdue'],
+            'status' => ['nullable', 'in:assigned,in_progress,completed,draft,delayed'],
+            'filter' => ['nullable', 'in:overdue,delayed'],
         ]);
 
         $query = WorkOrder::query()
@@ -388,6 +399,17 @@ class SupervisorController extends ModuleController
         if (!empty($validated['status'])) {
             if ($validated['status'] === 'in_progress') {
                 $query->whereIn('work_status', ['assigned', 'in_progress']);
+            } elseif ($validated['status'] === 'draft') {
+                // Technician declined assignments are returned to draft with delay_reason.
+                $query->whereIn('work_status', ['draft', 'paused']);
+            } elseif ($validated['status'] === 'delayed') {
+                $query->where(function ($q) {
+                    $q->where(function ($inner) {
+                        $inner->whereNotNull('delay_reason')
+                            ->where('delay_reason', '!=', '');
+                    })->orWhereHas('request', fn ($rq) => $rq
+                        ->where('is_overdue', 1));
+                });
             } else {
                 $query->where('work_status', $validated['status']);
             }
@@ -399,11 +421,20 @@ class SupervisorController extends ModuleController
                 ->where('due_date', '<', now())
                 ->whereNotIn('status', ['completed', 'closed']));
         }
+        if (($validated['filter'] ?? null) === 'delayed') {
+            $query->where(function ($q) {
+                $q->where(function ($inner) {
+                    $inner->whereNotNull('delay_reason')
+                        ->where('delay_reason', '!=', '');
+                })->orWhereHas('request', fn ($rq) => $rq
+                    ->where('is_overdue', 1));
+            });
+        }
 
         $workOrders = $query->paginate(15);
         $workOrders->getCollection()->transform(function ($wo) {
             $dueDate = $wo->request?->due_date;
-            $wo->days_late = $dueDate ? (int) Carbon::parse($dueDate)->diffInDays(now()) : 0;
+            $wo->days_late = $dueDate ? max(0, (int) Carbon::parse($dueDate)->diffInDays(now(), false)) : 0;
             return $wo;
         });
 
@@ -424,6 +455,9 @@ class SupervisorController extends ModuleController
                 'request.asset:id,name',
                 'request.category:id,name',
                 'request.requester:id,fname,lname,phone,email,profile_picture',
+                'request.statusLogs' => fn ($q) => $q
+                    ->with('changedBy:id,fname,lname')
+                    ->orderByDesc('created_at'),
                 'assignee:id,fname,lname,phone,email',
                 'spareParts.sparePart',
                 'technicianCompletionReport.spareParts.sparePart',
@@ -465,6 +499,11 @@ class SupervisorController extends ModuleController
             'finish_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'due_date' => ['nullable', 'date'],
             'scheduled_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_start_date' => ['nullable', 'date'],
+            'scheduled_end_date' => ['nullable', 'date'],
+            'scheduled_start_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_end_time' => ['nullable', 'date_format:H:i'],
+            'schedule_note' => ['nullable', 'string', 'max:1500'],
             'priority' => ['nullable', 'in:low,medium,high,urgent'],
         ]);
 
@@ -481,16 +520,37 @@ class SupervisorController extends ModuleController
             ], 422);
         }
 
-        $startDate = $validated['start_date'] ?? $workOrder->scheduled_date;
-        $finishDate = $validated['finish_date'] ?? null;
+        $window = $this->resolveScheduleWindow($validated, [
+            'scheduled_start_date' => $workOrder->scheduled_start_date?->toDateString(),
+            'scheduled_end_date' => $workOrder->scheduled_end_date?->toDateString(),
+            'scheduled_start_time' => $workOrder->scheduled_start_time,
+            'scheduled_end_time' => $workOrder->scheduled_end_time,
+            'scheduled_date' => $workOrder->scheduled_date?->toDateString(),
+            'scheduled_time' => $workOrder->scheduled_time,
+        ]);
+        $this->assertValidScheduleWindow($window);
+        $this->assertNoTechnicianScheduleOverlap(
+            $newAssigneeId,
+            $window['scheduled_start_date'],
+            $window['scheduled_start_time'],
+            $window['scheduled_end_date'],
+            $window['scheduled_end_time'],
+            $workOrder->id
+        );
 
-        $workOrder->update([
+        $workOrder->update($this->sanitizeWorkOrderPayload([
             'assigned_to' => $newAssigneeId,
             'priority' => $validated['priority'] ?? $workOrder->priority,
-            'scheduled_date' => $startDate,
-            'scheduled_time' => $validated['scheduled_time'] ?? $workOrder->scheduled_time,
+            'scheduled_date' => $window['scheduled_date'],
+            'scheduled_time' => $window['scheduled_time'],
+            'scheduled_start_date' => $window['scheduled_start_date'],
+            'scheduled_end_date' => $window['scheduled_end_date'],
+            'scheduled_start_time' => $window['scheduled_start_time'],
+            'scheduled_end_time' => $window['scheduled_end_time'],
+            'schedule_note' => $validated['schedule_note'] ?? $workOrder->schedule_note,
+            'notification_status' => 'rescheduled',
             'work_status' => 'assigned',
-        ]);
+        ]));
 
         if ($workOrder->request) {
             $requestTicket = $workOrder->request;
@@ -498,7 +558,7 @@ class SupervisorController extends ModuleController
             $requestTicket->update([
                 'status' => 'assigned',
                 'priority' => $validated['priority'] ?? $requestTicket->priority,
-                'due_date' => $validated['due_date'] ?? $finishDate ?? $requestTicket->due_date,
+                'due_date' => $validated['due_date'] ?? $window['scheduled_end_date'] ?? $requestTicket->due_date,
             ]);
 
             RequestStatusLog::create([
@@ -513,7 +573,7 @@ class SupervisorController extends ModuleController
                 $this->notifyRequester(
                     $requestTicket,
                     'request_reassigned',
-                    "Your maintenance request #{$this->requestCode($requestTicket->id)} has been reassigned to a technician.",
+                    "Your maintenance request #{$this->requestCode($requestTicket->id)} has been reassigned. Visit window: {$this->formatScheduleWindow($window)}.",
                     'request'
                 );
             }
@@ -530,8 +590,8 @@ class SupervisorController extends ModuleController
 
         $this->notifyTechnician(
             $newAssigneeId,
-            'work_order_assigned',
-            "You have been assigned work order #{$workOrder->id}.",
+            'work_order_rescheduled',
+            "Work order #{$workOrder->id} schedule updated. Visit window: {$this->formatScheduleWindow($window)}.",
             $workOrder->request_id ?? $workOrder->id
         );
 
@@ -787,7 +847,8 @@ class SupervisorController extends ModuleController
     {
         $this->authorizeRoles($request, ['supervisor', 'admin']);
         $validated = $request->validate([
-            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
+            'all' => ['nullable', 'boolean'],
         ]);
 
         $supportsSpecialties = Schema::hasTable('specialties') && Schema::hasTable('technician_specialties');
@@ -797,9 +858,13 @@ class SupervisorController extends ModuleController
                 'assignedWorkOrders as open_workload' => fn ($q) => $q->whereIn('work_status', ['assigned', 'in_progress']),
             ]);
 
-        if ($supportsSpecialties) {
+        $useAllTechnicians = !empty($validated['all']) || empty($validated['category_id']);
+
+        if ($supportsSpecialties && !$useAllTechnicians) {
             $base->whereHas('specialties', fn ($q) => $q->where('category_id', $validated['category_id']))
                 ->with(['specialties:id,name,category_id']);
+        } elseif ($supportsSpecialties) {
+            $base->with(['specialties:id,name,category_id']);
         }
 
         $technicians = $base
@@ -834,6 +899,11 @@ class SupervisorController extends ModuleController
             'due_date' => ['nullable', 'date'],
             'scheduled_date' => ['nullable', 'date'],
             'scheduled_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_start_date' => ['nullable', 'date'],
+            'scheduled_end_date' => ['nullable', 'date'],
+            'scheduled_start_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_end_time' => ['nullable', 'date_format:H:i'],
+            'schedule_note' => ['nullable', 'string', 'max:1500'],
             'estimated_hours' => ['nullable', 'numeric', 'min:0.25'],
             'priority' => ['nullable', 'in:low,medium,high,urgent'],
         ]);
@@ -861,28 +931,42 @@ class SupervisorController extends ModuleController
         $previousAssigneeId = $existingWorkOrder?->assigned_to ? (int) $existingWorkOrder->assigned_to : null;
         $targetAssigneeId = (int) $validated['assigned_to'];
         $isReassignment = $previousAssigneeId !== null && $previousAssigneeId !== $targetAssigneeId;
-        $startDate = $validated['start_date'] ?? $validated['scheduled_date'] ?? null;
-        $finishDate = $validated['finish_date'] ?? null;
+        $window = $this->resolveScheduleWindow($validated);
+        $this->assertValidScheduleWindow($window);
+        $this->assertNoTechnicianScheduleOverlap(
+            $targetAssigneeId,
+            $window['scheduled_start_date'],
+            $window['scheduled_start_time'],
+            $window['scheduled_end_date'],
+            $window['scheduled_end_time'],
+            $existingWorkOrder?->id
+        );
         $priority = $validated['priority'] ?? $ticket->priority;
 
         $workOrder = WorkOrder::query()->updateOrCreate(
             ['request_id' => $ticket->id],
-            [
+            $this->sanitizeWorkOrderPayload([
                 'created_by' => $user->id,
                 'assigned_to' => $targetAssigneeId,
                 'priority' => $priority,
-                'scheduled_date' => $startDate,
-                'scheduled_time' => $validated['scheduled_time'] ?? null,
+                'scheduled_date' => $window['scheduled_date'],
+                'scheduled_time' => $window['scheduled_time'],
+                'scheduled_start_date' => $window['scheduled_start_date'],
+                'scheduled_end_date' => $window['scheduled_end_date'],
+                'scheduled_start_time' => $window['scheduled_start_time'],
+                'scheduled_end_time' => $window['scheduled_end_time'],
+                'schedule_note' => $validated['schedule_note'] ?? null,
+                'notification_status' => $isReassignment ? 'rescheduled' : 'scheduled',
                 'estimated_hours' => $validated['estimated_hours'] ?? null,
                 'work_status' => 'assigned',
-            ]
+            ])
         );
 
         $oldStatus = $ticket->status;
         $ticket->update([
             'status' => 'assigned',
             'priority' => $priority,
-            'due_date' => $validated['due_date'] ?? $finishDate ?? $ticket->due_date,
+            'due_date' => $validated['due_date'] ?? $window['scheduled_end_date'] ?? $ticket->due_date,
         ]);
 
         RequestStatusLog::create([
@@ -919,8 +1003,8 @@ class SupervisorController extends ModuleController
             $targetAssigneeId,
             'work_order_assigned',
             $isReassignment
-                ? "You have been reassigned maintenance request #{$this->requestCode($ticket->id)}."
-                : "You have been assigned maintenance request #{$this->requestCode($ticket->id)}.",
+                ? "You have been reassigned maintenance request #{$this->requestCode($ticket->id)}. Scheduled: {$this->formatScheduleWindow($window)}."
+                : "You have been assigned maintenance request #{$this->requestCode($ticket->id)}. Scheduled: {$this->formatScheduleWindow($window)}.",
             $ticket->id
         );
 
@@ -929,7 +1013,7 @@ class SupervisorController extends ModuleController
             $isReassignment ? 'request_reassigned' : 'request_assigned',
             $isReassignment
                 ? "Your maintenance request #{$this->requestCode($ticket->id)} has been reassigned to a technician."
-                : "Your maintenance request #{$this->requestCode($ticket->id)} has been approved and assigned to a technician.",
+                : "Your maintenance request #{$this->requestCode($ticket->id)} has been approved and assigned to a technician. Visit window: {$this->formatScheduleWindow($window)}.",
             'request'
         );
 
@@ -1050,6 +1134,11 @@ class SupervisorController extends ModuleController
             'priority' => ['required', 'in:low,medium,high,urgent'],
             'scheduled_date' => ['nullable', 'date'],
             'scheduled_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_start_date' => ['nullable', 'date'],
+            'scheduled_end_date' => ['nullable', 'date'],
+            'scheduled_start_time' => ['nullable', 'date_format:H:i'],
+            'scheduled_end_time' => ['nullable', 'date_format:H:i'],
+            'schedule_note' => ['nullable', 'string', 'max:1500'],
             'estimated_hours' => ['nullable', 'numeric', 'min:0.25'],
             'release' => ['sometimes', 'boolean'],
             'spare_parts' => ['sometimes', 'array'],
@@ -1058,8 +1147,19 @@ class SupervisorController extends ModuleController
         ]);
 
         $status = !empty($validated['release']) ? 'assigned' : 'draft';
+        $window = $this->resolveScheduleWindow($validated);
+        $this->assertValidScheduleWindow($window);
+        if (!empty($validated['assigned_to'])) {
+            $this->assertNoTechnicianScheduleOverlap(
+                (int) $validated['assigned_to'],
+                $window['scheduled_start_date'],
+                $window['scheduled_start_time'],
+                $window['scheduled_end_date'],
+                $window['scheduled_end_time']
+            );
+        }
 
-        $workOrder = WorkOrder::create([
+        $workOrder = WorkOrder::create($this->sanitizeWorkOrderPayload([
             'request_id' => null,
             'created_by' => $user->id,
             'assigned_to' => $validated['assigned_to'] ?? null,
@@ -1070,11 +1170,17 @@ class SupervisorController extends ModuleController
             'room_id' => $validated['room_id'] ?? null,
             'custom_location' => $validated['custom_location'] ?? null,
             'priority' => $validated['priority'],
-            'scheduled_date' => $validated['scheduled_date'] ?? null,
-            'scheduled_time' => $validated['scheduled_time'] ?? null,
+            'scheduled_date' => $window['scheduled_date'],
+            'scheduled_time' => $window['scheduled_time'],
+            'scheduled_start_date' => $window['scheduled_start_date'],
+            'scheduled_end_date' => $window['scheduled_end_date'],
+            'scheduled_start_time' => $window['scheduled_start_time'],
+            'scheduled_end_time' => $window['scheduled_end_time'],
+            'schedule_note' => $validated['schedule_note'] ?? null,
+            'notification_status' => $status === 'assigned' ? 'scheduled' : 'pending',
             'estimated_hours' => $validated['estimated_hours'] ?? null,
             'work_status' => $status,
-        ]);
+        ]));
 
         $totalSpareCost = 0.0;
         foreach ($validated['spare_parts'] ?? [] as $partUsage) {
@@ -1123,6 +1229,8 @@ class SupervisorController extends ModuleController
                 "Manual work order: {$workOrder->title}.",
                 !empty($validated['description']) ? "Details: {$validated['description']}." : null,
                 $location !== '' ? "Location: {$location}." : null,
+                "Visit window: {$this->formatScheduleWindow($window)}.",
+                !empty($validated['schedule_note']) ? "Schedule note: {$validated['schedule_note']}." : null,
                 "Assigned by Supervisor {$supervisorName}.",
             ];
 
@@ -1422,6 +1530,9 @@ class SupervisorController extends ModuleController
             ->all();
 
         $sparePartIssueQuery = $this->filteredPartIssueQuery($from, $to, $filters);
+        $approvedSparePartRequestCost = $this->approvedSparePartRequestItemsQuery($from, $to, $filters)
+            ->toBase()
+            ->sum(DB::raw('COALESCE(spare_part_request_items.approved_quantity, 0) * COALESCE(spare_part_request_items.unit_price_snapshot, 0)'));
 
         $summary = [
             'from' => $from,
@@ -1431,7 +1542,11 @@ class SupervisorController extends ModuleController
             'completed_percent' => $total > 0 ? round(($completed / $total) * 100, 2) : 0,
             'overdue_percent' => $total > 0 ? round(($overdue / $total) * 100, 2) : 0,
             'top_departments' => $topDepartments,
-            'spare_part_total_cost' => (float) (clone $sparePartIssueQuery)->sum('part_issues.total_cost'),
+            'spare_part_total_cost' => round(
+                (float) (clone $sparePartIssueQuery)->sum('part_issues.total_cost')
+                + (float) ($approvedSparePartRequestCost ?? 0),
+                2
+            ),
             'average_resolution_time_hours' => round((float) ($avgResolution ?? 0), 2),
             'priority_distribution' => $priorityDistribution,
             'monthly_performance' => $monthlyPerformance,
@@ -1773,9 +1888,25 @@ class SupervisorController extends ModuleController
                 'workOrder.request.building:id,name',
             ])
             ->whereBetween('issue_date', [$from, $to])
-            ->whereHas('workOrder.request', function ($rq) use ($filters, $from, $to) {
-                $rq->whereBetween('created_at', [$from, $to]);
-                $this->applyDimensionFilters($rq, $filters);
+            ->whereHas('workOrder', function ($wo) use ($filters) {
+                $wo->when(!empty($filters['building_id']), function ($wq) use ($filters) {
+                    $buildingId = (int) $filters['building_id'];
+                    $wq->where(function ($inner) use ($buildingId) {
+                        $inner->where('building_id', $buildingId)
+                            ->orWhereHas('request', fn ($rq) => $rq->where('building_id', $buildingId));
+                    });
+                });
+                $wo->when(!empty($filters['category_id']), function ($wq) use ($filters) {
+                    $categoryId = (int) $filters['category_id'];
+                    $wq->where(function ($inner) use ($categoryId) {
+                        $inner->where('category_id', $categoryId)
+                            ->orWhereHas('request', fn ($rq) => $rq->where('category_id', $categoryId));
+                    });
+                });
+                $wo->when(!empty($filters['department_id']), fn ($wq) => $wq
+                    ->whereHas('request', fn ($rq) => $rq->where('department_id', (int) $filters['department_id'])));
+                $wo->when(!empty($filters['asset_id']), fn ($wq) => $wq
+                    ->whereHas('request', fn ($rq) => $rq->where('asset_id', (int) $filters['asset_id'])));
             })
             ->orderByDesc('issue_date')
             ->get();
@@ -1786,7 +1917,7 @@ class SupervisorController extends ModuleController
             ->groupBy(fn ($row) => "{$row->work_order_id}:{$row->spare_part_id}")
             ->map(fn ($rows) => (int) $rows->sum('quantity_used'));
 
-        $consumptionLog = $issues->map(function ($issue) use ($installedByPair) {
+        $issueLog = $issues->map(function ($issue) use ($installedByPair) {
             $key = "{$issue->work_order_id}:{$issue->part_id}";
             $installedQty = (int) ($installedByPair[$key] ?? 0);
             $waste = max(0, ((int) $issue->quantity_issued) - $installedQty);
@@ -1803,8 +1934,44 @@ class SupervisorController extends ModuleController
                 'waste_quantity' => $waste,
                 'unit_cost' => (float) ($issue->unit_cost ?? 0),
                 'total_cost' => (float) ($issue->total_cost ?? 0),
+                'source' => 'inventory_issue',
             ];
         })->values();
+
+        $approvedRequestLog = $this->approvedSparePartRequestItemsQuery($from, $to, $filters)
+            ->with([
+                'part:id,name,part_code',
+                'request:id,request_number,work_order_id,status,approved_at',
+                'request.workOrder:id,request_id',
+                'request.workOrder.request:id,department_id,building_id',
+                'request.workOrder.request.department:id,name',
+                'request.workOrder.request.building:id,name',
+            ])
+            ->get()
+            ->map(function (SparePartRequestItem $item) {
+                $approvedQty = (int) ($item->approved_quantity ?? 0);
+                $unitCost = (float) ($item->unit_price_snapshot ?? 0);
+                return [
+                    'issue_date' => optional($item->request?->approved_at)->toDateString(),
+                    'work_order_id' => (int) ($item->request?->work_order_id ?? 0),
+                    'part_name' => $item->part_name_snapshot ?: ($item->part?->name ?? 'Unknown'),
+                    'part_code' => $item->part_code_snapshot ?: ($item->part?->part_code ?? ''),
+                    'department' => $item->request?->workOrder?->request?->department?->name ?? 'Unknown',
+                    'building' => $item->request?->workOrder?->request?->building?->name ?? 'Unknown',
+                    'quantity_issued' => $approvedQty,
+                    'quantity_installed' => $approvedQty,
+                    'waste_quantity' => 0,
+                    'unit_cost' => $unitCost,
+                    'total_cost' => round($approvedQty * $unitCost, 2),
+                    'source' => 'approved_request',
+                ];
+            })
+            ->values();
+
+        $consumptionLog = $issueLog
+            ->concat($approvedRequestLog)
+            ->sortByDesc(fn ($row) => strtotime((string) ($row['issue_date'] ?? '1970-01-01')))
+            ->values();
 
         $totalCost = (float) $consumptionLog->sum('total_cost');
 
@@ -2032,10 +2199,38 @@ class SupervisorController extends ModuleController
     {
         return PartIssue::query()
             ->join('work_orders', 'work_orders.id', '=', 'part_issues.work_order_id')
-            ->join('maintenance_requests', 'maintenance_requests.id', '=', 'work_orders.request_id')
+            ->leftJoin('maintenance_requests', 'maintenance_requests.id', '=', 'work_orders.request_id')
             ->whereBetween('part_issues.issue_date', [$from, $to])
-            ->whereBetween('maintenance_requests.created_at', [$from, $to])
             ->tap(fn ($q) => $this->applyDimensionFilters($q, $filters));
+    }
+
+    private function approvedSparePartRequestItemsQuery(Carbon $from, Carbon $to, array $filters)
+    {
+        return SparePartRequestItem::query()
+            ->join('spare_part_requests', 'spare_part_requests.id', '=', 'spare_part_request_items.spare_part_request_id')
+            ->leftJoin('work_orders', 'work_orders.id', '=', 'spare_part_requests.work_order_id')
+            ->leftJoin('maintenance_requests', 'maintenance_requests.id', '=', 'work_orders.request_id')
+            ->whereIn('spare_part_requests.status', ['approved', 'collected', 'expired'])
+            ->whereNotNull('spare_part_requests.approved_at')
+            ->whereBetween('spare_part_requests.approved_at', [$from, $to])
+            ->whereRaw('COALESCE(spare_part_request_items.approved_quantity, 0) > 0')
+            ->when(!empty($filters['building_id']), function ($q) use ($filters) {
+                $buildingId = (int) $filters['building_id'];
+                $q->where(function ($wq) use ($buildingId) {
+                    $wq->where('work_orders.building_id', $buildingId)
+                        ->orWhere('maintenance_requests.building_id', $buildingId);
+                });
+            })
+            ->when(!empty($filters['category_id']), function ($q) use ($filters) {
+                $categoryId = (int) $filters['category_id'];
+                $q->where(function ($wq) use ($categoryId) {
+                    $wq->where('work_orders.category_id', $categoryId)
+                        ->orWhere('maintenance_requests.category_id', $categoryId);
+                });
+            })
+            ->when(!empty($filters['department_id']), fn ($q) => $q->where('maintenance_requests.department_id', (int) $filters['department_id']))
+            ->when(!empty($filters['asset_id']), fn ($q) => $q->where('maintenance_requests.asset_id', (int) $filters['asset_id']))
+            ->select('spare_part_request_items.*');
     }
 
     private function buildPreventiveMaintenanceReport(Carbon $from, Carbon $to, array $filters): array
@@ -2272,6 +2467,165 @@ class SupervisorController extends ModuleController
     private function requestCode(int $id): string
     {
         return sprintf('REQ-%03d', $id);
+    }
+
+    private function fullName(?User $user): string
+    {
+        if (!$user) {
+            return 'Unknown';
+        }
+
+        $name = trim("{$user->fname} {$user->lname}");
+        return $name !== '' ? $name : 'Unknown';
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function sanitizeWorkOrderPayload(array $payload): array
+    {
+        foreach (array_keys($payload) as $column) {
+            if (!$this->supportsWorkOrderColumn($column)) {
+                unset($payload[$column]);
+            }
+        }
+
+        return $payload;
+    }
+
+    private function supportsWorkOrderColumn(string $column): bool
+    {
+        if (!array_key_exists($column, $this->workOrderColumnCache)) {
+            $this->workOrderColumnCache[$column] = Schema::hasColumn('work_orders', $column);
+        }
+        return $this->workOrderColumnCache[$column];
+    }
+
+    /**
+     * @param array<string, mixed> $validated
+     * @param array<string, mixed> $fallback
+     * @return array{
+     *   scheduled_start_date:?string,
+     *   scheduled_end_date:?string,
+     *   scheduled_start_time:?string,
+     *   scheduled_end_time:?string,
+     *   scheduled_date:?string,
+     *   scheduled_time:?string
+     * }
+     */
+    private function resolveScheduleWindow(array $validated, array $fallback = []): array
+    {
+        $startDate = $validated['scheduled_start_date']
+            ?? $validated['start_date']
+            ?? $validated['scheduled_date']
+            ?? ($fallback['scheduled_start_date'] ?? $fallback['scheduled_date'] ?? null);
+        $endDate = $validated['scheduled_end_date']
+            ?? $validated['finish_date']
+            ?? ($fallback['scheduled_end_date'] ?? null);
+        $startTime = $validated['scheduled_start_time']
+            ?? $validated['scheduled_time']
+            ?? ($fallback['scheduled_start_time'] ?? $fallback['scheduled_time'] ?? null);
+        $endTime = $validated['scheduled_end_time']
+            ?? ($fallback['scheduled_end_time'] ?? null);
+
+        return [
+            'scheduled_start_date' => $startDate,
+            'scheduled_end_date' => $endDate,
+            'scheduled_start_time' => $startTime,
+            'scheduled_end_time' => $endTime,
+            'scheduled_date' => $startDate,
+            'scheduled_time' => $startTime,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $window
+     */
+    private function assertValidScheduleWindow(array $window): void
+    {
+        $startDate = $window['scheduled_start_date'] ?? null;
+        $endDate = $window['scheduled_end_date'] ?? null;
+        $startTime = $window['scheduled_start_time'] ?? null;
+        $endTime = $window['scheduled_end_time'] ?? null;
+
+        if (!$startDate || !$endDate || !$startTime || !$endTime) {
+            return;
+        }
+
+        $start = Carbon::parse("{$startDate} {$startTime}");
+        $end = Carbon::parse("{$endDate} {$endTime}");
+        if ($end->lt($start)) {
+            throw ValidationException::withMessages([
+                'scheduled_end_date' => ['Scheduled end datetime cannot be before scheduled start datetime.'],
+            ]);
+        }
+    }
+
+    private function assertNoTechnicianScheduleOverlap(
+        int $technicianId,
+        ?string $startDate,
+        ?string $startTime,
+        ?string $endDate,
+        ?string $endTime,
+        ?int $excludeWorkOrderId = null
+    ): void {
+        if (!$startDate || !$startTime || !$endDate || !$endTime) {
+            return;
+        }
+
+        $newStart = Carbon::parse("{$startDate} {$startTime}");
+        $newEnd = Carbon::parse("{$endDate} {$endTime}");
+        if ($newEnd->lt($newStart)) {
+            return;
+        }
+
+        $query = WorkOrder::query()
+            ->where('assigned_to', $technicianId)
+            ->whereIn('work_status', ['assigned', 'in_progress', 'paused']);
+        if ($excludeWorkOrderId) {
+            $query->where('id', '!=', $excludeWorkOrderId);
+        }
+
+        $candidate = $query
+            ->whereNotNull('scheduled_start_date')
+            ->whereNotNull('scheduled_end_date')
+            ->whereNotNull('scheduled_start_time')
+            ->whereNotNull('scheduled_end_time')
+            ->get([
+                'id',
+                'scheduled_start_date',
+                'scheduled_end_date',
+                'scheduled_start_time',
+                'scheduled_end_time',
+            ])
+            ->first(function (WorkOrder $wo) use ($newStart, $newEnd) {
+                $existingStart = Carbon::parse("{$wo->scheduled_start_date} {$wo->scheduled_start_time}");
+                $existingEnd = Carbon::parse("{$wo->scheduled_end_date} {$wo->scheduled_end_time}");
+                return $newStart < $existingEnd && $newEnd > $existingStart;
+            });
+
+        if ($candidate) {
+            throw ValidationException::withMessages([
+                'assigned_to' => ["Selected technician already has an overlapping schedule (work order #{$candidate->id})."],
+            ]);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $window
+     */
+    private function formatScheduleWindow(array $window): string
+    {
+        $sd = $window['scheduled_start_date'] ?? null;
+        $st = $window['scheduled_start_time'] ?? null;
+        $ed = $window['scheduled_end_date'] ?? null;
+        $et = $window['scheduled_end_time'] ?? null;
+        if (!$sd || !$st || !$ed || !$et) {
+            return 'TBD';
+        }
+
+        return "{$sd} {$st} - {$ed} {$et}";
     }
 
     private function profilePictureUrl(?string $path): ?string

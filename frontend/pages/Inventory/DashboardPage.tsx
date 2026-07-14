@@ -99,7 +99,7 @@ export default function DashboardPage() {
         />
       </section>
 
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="rounded-2rem border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-black text-slate-900">Recent Requests</h2>
@@ -110,7 +110,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="mt-6 overflow-hidden rounded-[1.5rem] border border-slate-200">
+        <div className="mt-6 overflow-hidden rounded-1.5rem border border-slate-200">
           {recentRequests.length === 0 ? (
             <EmptyState message="No recent requests available." />
           ) : (
@@ -140,7 +140,7 @@ function StatCard({
   formatter?: (value: number) => string;
 }) {
   return (
-    <div className={`rounded-[2rem] p-6 shadow-sm ${tone}`}>
+    <div className={`rounded-2rem p-6 shadow-sm ${tone}`}>
       <div className="flex items-start justify-between gap-4">
         <div className="rounded-xl bg-white/10 p-2">{icon}</div>
         <p className="text-[10px] font-black uppercase tracking-[0.25em] opacity-70 text-right">{label}</p>

@@ -14,6 +14,7 @@ class Asset extends Model
         'category_id',
         'building_id',
         'room_id',
+        'custom_location',
         'serial_number',
         'status',
         'image_path',

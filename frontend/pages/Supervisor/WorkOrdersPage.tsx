@@ -25,9 +25,10 @@ const statusStyles: Record<string, string> = {
   in_progress: "bg-blue-100 text-blue-700 border-blue-200",
   completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
   draft: "bg-slate-100 text-slate-700 border-slate-200",
+  paused: "bg-violet-100 text-violet-700 border-violet-200",
 };
 
-const allowedStatusFilters = new Set(["assigned", "in_progress", "completed", "draft"]);
+const allowedStatusFilters = new Set(["assigned", "in_progress", "completed", "draft", "delayed"]);
 
 export default function WorkOrdersPage() {
   const router = useRouter();
@@ -135,7 +136,8 @@ export default function WorkOrdersPage() {
             { label: "Assigned", value: "assigned" },
             { label: "In Progress", value: "in_progress" },
             { label: "Completed", value: "completed" },
-            { label: "Draft", value: "draft" },
+            { label: "Delayed", value: "delayed" },
+            { label: "Draft / Paused", value: "draft" },
           ].map((opt) => (
             <button
               key={opt.value}

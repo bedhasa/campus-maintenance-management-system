@@ -22,6 +22,12 @@ class WorkOrder extends Model
         'priority',
         'scheduled_date',
         'scheduled_time',
+        'scheduled_start_date',
+        'scheduled_end_date',
+        'scheduled_start_time',
+        'scheduled_end_time',
+        'schedule_note',
+        'notification_status',
         'estimated_hours',
         'work_status',
         'completion_note',
@@ -38,6 +44,8 @@ class WorkOrder extends Model
 
     protected $casts = [
         'scheduled_date' => 'date',
+        'scheduled_start_date' => 'date',
+        'scheduled_end_date' => 'date',
         'started_at' => 'datetime',
         'paused_at' => 'datetime',
         'resumed_at' => 'datetime',

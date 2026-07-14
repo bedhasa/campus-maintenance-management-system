@@ -2,16 +2,20 @@
 
 namespace App\Models;
 
+use Illuminate\Contracts\Auth\CanResetPassword as CanResetPasswordContract;
+use Illuminate\Contracts\Auth\MustVerifyEmail as MustVerifyEmailContract;
+use Illuminate\Auth\MustVerifyEmail as MustVerifyEmailTrait;
+use Illuminate\Auth\Passwords\CanResetPassword as CanResetPasswordTrait;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use App\Notifications\ResetPasswordNotification;
 use App\Notifications\VerifyEmailNotification;
+use Illuminate\Auth\Notifications\ResetPassword as BaseResetPassword;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable
+class User extends Authenticatable implements MustVerifyEmailContract, CanResetPasswordContract
 {
-    use HasApiTokens, HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable, MustVerifyEmailTrait, CanResetPasswordTrait;
 
     protected $fillable = [
         'fname',
@@ -63,12 +67,28 @@ class User extends Authenticatable
 
     public function sendPasswordResetNotification($token): void
     {
-        $this->notify(new ResetPasswordNotification($token));
+        $this->notify(new BaseResetPassword($token));
     }
 
     public function sendEmailVerificationNotification(): void
     {
         $this->notify(new VerifyEmailNotification());
+    }
+
+    public function hasVerifiedEmail(): bool
+    {
+        return (bool) $this->is_verified;
+    }
+
+    public function markEmailAsVerified(): bool
+    {
+        if ($this->hasVerifiedEmail()) {
+            return false;
+        }
+
+        $this->forceFill(['is_verified' => true])->save();
+
+        return true;
     }
 
     // Relationship: User belongs to Department
@@ -162,5 +182,10 @@ class User extends Authenticatable
     public function partIssuesIssued()
     {
         return $this->hasMany(PartIssue::class, 'issued_by');
+    }
+
+    public function sparePartRequests()
+    {
+        return $this->hasMany(SparePartRequest::class, 'technician_id');
     }
 }

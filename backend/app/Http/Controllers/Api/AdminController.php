@@ -163,7 +163,7 @@ class AdminController extends ModuleController
             'status' => ['nullable', 'string', 'max:20'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
-            'export' => ['nullable', 'in:excel'],
+            'export' => ['nullable', 'in:excel,csv'],
         ]);
 
         $query = \App\Models\SystemActivityLog::query()
@@ -189,9 +189,10 @@ class AdminController extends ModuleController
             $query->whereDate('created_at', '<=', $validated['to']);
         }
 
-        if (($validated['export'] ?? null) === 'excel') {
+        if (in_array(($validated['export'] ?? null), ['excel', 'csv'], true)) {
+            $exportType = $validated['export'];
             $rows = $query->limit(5000)->get();
-            $delimiter = "\t";
+            $delimiter = $exportType === 'csv' ? ',' : "\t";
             $headers = [
                 'ID',
                 'DateTime',
@@ -204,11 +205,19 @@ class AdminController extends ModuleController
                 'IP',
                 'Description',
             ];
-            $lines = [implode($delimiter, $headers)];
+            $escapeCell = function (mixed $value) use ($delimiter, $exportType): string {
+                $text = str_replace(["\r", "\n", "\t"], ' ', (string) $value);
+                if ($exportType === 'csv') {
+                    $text = str_replace('"', '""', $text);
+                    return '"' . $text . '"';
+                }
+                return $text;
+            };
+            $lines = [implode($delimiter, array_map($escapeCell, $headers))];
             foreach ($rows as $log) {
                 $userName = $log->user ? trim(($log->user->fname ?? '') . ' ' . ($log->user->lname ?? '')) : 'System';
                 $roles = $log->user ? $log->user->roles->pluck('name')->implode(', ') : '';
-                $lines[] = implode($delimiter, array_map(fn ($v) => str_replace(["\r", "\n", "\t"], ' ', (string) $v), [
+                $lines[] = implode($delimiter, array_map($escapeCell, [
                     $log->id,
                     optional($log->created_at)->toDateTimeString(),
                     $userName,
@@ -222,10 +231,19 @@ class AdminController extends ModuleController
                 ]));
             }
 
-            $content = implode("\n", $lines);
+            $content = "\xEF\xBB\xBF" . implode("\n", $lines);
+            $fileName = 'system-logs-' . now()->format('Y-m-d_H-i-s');
+
+            if ($exportType === 'csv') {
+                return response($content, 200, [
+                    'Content-Type' => 'text/csv; charset=UTF-8',
+                    'Content-Disposition' => "attachment; filename={$fileName}.csv",
+                ]);
+            }
+
             return response($content, 200, [
-                'Content-Type' => 'application/vnd.ms-excel',
-                'Content-Disposition' => 'attachment; filename=system-logs.xls',
+                'Content-Type' => 'application/vnd.ms-excel; charset=UTF-8',
+                'Content-Disposition' => "attachment; filename={$fileName}.xls",
             ]);
         }
 

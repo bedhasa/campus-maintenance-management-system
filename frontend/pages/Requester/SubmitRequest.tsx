@@ -22,6 +22,7 @@ type EditRequest = {
   title: string;
   description: string;
   category_id: number | null;
+  custom_category?: string | null;
   category_name?: string | null;
   building_id: number | null;
   building_name?: string | null;
@@ -48,6 +49,7 @@ type RequestDetailForEditResponse = {
     custom_location?: string | null;
     status: "submitted" | "approved" | "assigned" | "in_progress" | "completed" | "rejected" | "closed" | "cancelled";
     category?: { id?: number; name?: string | null } | null;
+    custom_category?: string | null;
     building?: { id?: number; name?: string | null } | null;
     room?: { id?: number; name?: string | null } | null;
     asset?: { id?: number; name?: string | null } | null;
@@ -82,7 +84,8 @@ type RequestListResponse = {
 type RequestPayload = {
   title: string;
   description: string;
-  category_id: number;
+  category_id: number | null;
+  custom_category: string | null;
   building_id: number | null;
   room_id: number | null;
   asset_id: number | null;
@@ -98,6 +101,7 @@ interface RequestFormInputs {
   locationType: "structured" | "custom";
   customLocation: string;
   problemType: string;
+  customProblemType: string;
   urgency: Priority;
   description: string;
 }
@@ -168,6 +172,7 @@ const SubmitRequest: React.FC = () => {
     locationType: "structured",
     customLocation: "",
     problemType: "",
+    customProblemType: "",
     urgency: Priority.MEDIUM,
     description: "",
   });
@@ -263,6 +268,7 @@ const SubmitRequest: React.FC = () => {
           title: req.title,
           description: req.description,
           category_id: req.category_id ?? req.category?.id ?? null,
+          custom_category: req.custom_category ?? null,
           category_name: req.category?.name ?? null,
           building_id: req.building_id ?? req.building?.id ?? null,
           building_name: req.building?.name ?? null,
@@ -321,7 +327,8 @@ const SubmitRequest: React.FC = () => {
       asset: resolvedAsset,
       locationType: hasStructuredLocation ? "structured" : "custom",
       customLocation: editData.custom_location ?? "",
-      problemType: resolvedCategory,
+      problemType: resolvedCategory || (editData.custom_category ? "other" : ""),
+      customProblemType: editData.custom_category ?? "",
       urgency: fromApiPriority(editData.priority),
       description: editData.description,
     });
@@ -390,7 +397,9 @@ const SubmitRequest: React.FC = () => {
         params.set("room_id", formData.room);
       }
       if (formData.problemType) {
-        params.set("category_id", formData.problemType);
+        if (formData.problemType !== "other") {
+          params.set("category_id", formData.problemType);
+        }
       }
 
       try {
@@ -455,6 +464,10 @@ const SubmitRequest: React.FC = () => {
       setError("Please provide a title and select a problem category.");
       return;
     }
+    if (step === 1 && formData.problemType === "other" && !formData.customProblemType.trim()) {
+      setError("Please enter custom category when selecting Other.");
+      return;
+    }
     if (step === 2 && formData.locationType === "structured" && (!formData.building || !formData.room)) {
       setError("Please select both building and room.");
       return;
@@ -477,6 +490,7 @@ const SubmitRequest: React.FC = () => {
       normalizeText(request.description) === normalizeText(payload.description) &&
       request.priority === payload.priority &&
       Number(requestCategoryId ?? 0) === Number(payload.category_id ?? 0) &&
+      normalizeText((request as { custom_category?: string | null }).custom_category) === normalizeText(payload.custom_category) &&
       Number(requestBuildingId ?? 0) === Number(payload.building_id ?? 0) &&
       Number(requestRoomId ?? 0) === Number(payload.room_id ?? 0) &&
       Number(requestAssetId ?? 0) === Number(payload.asset_id ?? 0) &&
@@ -576,7 +590,8 @@ const SubmitRequest: React.FC = () => {
     const payload: RequestPayload = {
       title: formData.title,
       description: formData.description,
-      category_id: Number(formData.problemType),
+      category_id: formData.problemType === "other" ? null : Number(formData.problemType),
+      custom_category: formData.problemType === "other" ? formData.customProblemType.trim() : null,
       building_id: formData.locationType === "structured" ? Number(formData.building) : null,
       room_id: formData.locationType === "structured" ? Number(formData.room) : null,
       asset_id: formData.locationType === "structured" && formData.asset ? Number(formData.asset) : null,
@@ -750,7 +765,16 @@ const SubmitRequest: React.FC = () => {
                 >
                   <option value="" className="text-slate-400">Select Type...</option>
                   {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value="other">Other</option>
                 </select>
+                {formData.problemType === "other" && (
+                  <input
+                    value={formData.customProblemType}
+                    onChange={(e) => updateField("customProblemType", e.target.value)}
+                    placeholder="Type custom category"
+                    className="w-full p-4 bg-slate-50 border-2 border-transparent rounded-2xl outline-none focus:border-blue-500 transition-all font-bold text-slate-900 placeholder:text-slate-500 shadow-sm"
+                  />
+                )}
               </div>
               <div className="space-y-3">
                 <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest ml-1">Urgency Level</label>

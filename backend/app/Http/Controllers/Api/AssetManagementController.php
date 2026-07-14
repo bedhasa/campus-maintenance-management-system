@@ -234,6 +234,7 @@ class AssetManagementController extends ModuleController
                 'category_id',
                 'building_id',
                 'room_id',
+                'custom_location',
                 'serial_number',
                 'status',
                 'image_path',
@@ -295,22 +296,34 @@ class AssetManagementController extends ModuleController
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:150'],
             'category_id' => ['required', 'integer', 'exists:categories,id'],
-            'building_id' => ['required', 'integer', 'exists:buildings,id'],
-            'room_id' => ['required', 'integer', 'exists:rooms,id'],
+            'building_id' => ['nullable', 'integer', 'exists:buildings,id'],
+            'room_id' => ['nullable', 'integer', 'exists:rooms,id'],
+            'custom_location' => ['nullable', 'string', 'max:255'],
             'serial_number' => ['nullable', 'string', 'max:100'],
             'status' => ['required', 'in:active,inactive'],
             'image' => ['nullable', 'image', 'max:4096'],
         ]);
 
-        $roomMatchesBuilding = Room::query()
-            ->where('id', $validated['room_id'])
-            ->where('building_id', $validated['building_id'])
-            ->exists();
+        $hasStructuredLocation = !empty($validated['building_id']) && !empty($validated['room_id']);
+        $hasCustomLocation = !empty(trim((string) ($validated['custom_location'] ?? '')));
 
-        if (!$roomMatchesBuilding) {
+        if (!$hasStructuredLocation && !$hasCustomLocation) {
             throw ValidationException::withMessages([
-                'room_id' => 'Selected room does not belong to the selected building.',
+                'custom_location' => 'Please provide either building+room or a custom location.',
             ]);
+        }
+
+        if ($hasStructuredLocation) {
+            $roomMatchesBuilding = Room::query()
+                ->where('id', $validated['room_id'])
+                ->where('building_id', $validated['building_id'])
+                ->exists();
+
+            if (!$roomMatchesBuilding) {
+                throw ValidationException::withMessages([
+                    'room_id' => 'Selected room does not belong to the selected building.',
+                ]);
+            }
         }
 
         return $validated;

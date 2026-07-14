@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\Requester\SettingsController as RequesterSettingsCo
 use App\Http\Controllers\Api\RequesterFeedbackController;
 use App\Http\Controllers\Api\SupervisorController;
 use App\Http\Controllers\Api\InventoryController;
+use App\Http\Controllers\Api\SparePartRequestController;
 use App\Http\Controllers\Api\TechnicianController;
 
 Route::post('/register', [AuthController::class, 'register']);
@@ -153,6 +154,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::patch('/{id}/checklist/{checklistId}', [PMModuleController::class, 'updateChecklist']);
             Route::post('/{id}/complete', [PMModuleController::class, 'completeTask']);
         });
+
+        // Spare Part Requests (Technician -> Inventory Officer workflow)
+        Route::get('/spare-part-requests/meta', [SparePartRequestController::class, 'technicianMeta']);
+        Route::get('/spare-part-requests', [SparePartRequestController::class, 'technicianIndex']);
+        Route::post('/spare-part-requests', [SparePartRequestController::class, 'technicianStore']);
+        Route::get('/spare-part-requests/{id}', [SparePartRequestController::class, 'technicianShow']);
     });
 
     Route::prefix('/inventory')->group(function () {
@@ -168,6 +175,15 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/part-requests/{id}/issue', [InventoryController::class, 'issue']);
         Route::get('/part-issues', [InventoryController::class, 'issues']);
         Route::get('/reports', [InventoryController::class, 'reports']);
+
+        // Spare Part Requests (new workflow)
+        Route::get('/spare-part-requests/dashboard', [SparePartRequestController::class, 'inventoryDashboard']);
+        Route::get('/spare-part-requests', [SparePartRequestController::class, 'inventoryIndex']);
+        Route::get('/spare-part-requests/{id}', [SparePartRequestController::class, 'inventoryShow']);
+        Route::patch('/spare-part-requests/{id}/approve', [SparePartRequestController::class, 'inventoryApprove']);
+        Route::patch('/spare-part-requests/{id}/reject', [SparePartRequestController::class, 'inventoryReject']);
+        Route::patch('/spare-part-requests/{id}/collect', [SparePartRequestController::class, 'inventoryCollect']);
+        Route::patch('/spare-part-requests/{id}/expire', [SparePartRequestController::class, 'inventoryExpire']);
     });
 
     Route::prefix('/pm')->group(function () {

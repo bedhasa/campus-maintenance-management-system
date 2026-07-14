@@ -1,0 +1,17 @@
+# Root ignore rules (monorepo)
+
+# Next.js build artifacts
+frontend/.next/
+frontend/out/
+
+# Dependency folders
+frontend/node_modules/
+backend/vendor/
+
+# Logs / caches
+frontend/.next/**/logs/
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+

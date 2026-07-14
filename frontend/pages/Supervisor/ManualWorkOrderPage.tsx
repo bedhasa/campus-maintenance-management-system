@@ -54,8 +54,11 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
     assetId: "",
     customLocation: "",
     assignedTo: "",
-    scheduledDate: "",
-    scheduledTime: "",
+    scheduledStartDate: "",
+    scheduledEndDate: "",
+    scheduledStartTime: "",
+    scheduledEndTime: "",
+    scheduleNote: "",
     estimatedHours: "2",
     internalNotes: ""
   });
@@ -67,7 +70,7 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
     technicians: []
   });
 
-  const canRelease = Boolean(formData.assignedTo && formData.scheduledDate && formData.title && formData.categoryId);
+  const canRelease = Boolean(formData.assignedTo && formData.scheduledStartDate && formData.scheduledEndDate && formData.title && formData.categoryId);
 
   // --- STYLES ---
   const labelStyle = "text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5 block ml-1";
@@ -118,7 +121,7 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
     const errors: string[] = [];
     if (!formData.title || !formData.categoryId) errors.push("basis");
     if (formData.locationMode === "standard" && (!formData.buildingId || !formData.roomId)) errors.push("location");
-    if (release && (!formData.assignedTo || !formData.scheduledDate)) errors.push("assignment");
+    if (release && (!formData.assignedTo || !formData.scheduledStartDate || !formData.scheduledEndDate)) errors.push("assignment");
 
     if (errors.length > 0) {
       setSubmitError("Please complete the required fields before continuing.");
@@ -136,8 +139,11 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
         custom_location: formData.locationMode === "custom" ? formData.customLocation : null,
         assigned_to: formData.assignedTo ? Number(formData.assignedTo) : null,
         priority: formData.priority === "high" ? "urgent" : formData.priority,
-        scheduled_date: formData.scheduledDate || null,
-        scheduled_time: formData.scheduledTime || null,
+        scheduled_start_date: formData.scheduledStartDate || null,
+        scheduled_end_date: formData.scheduledEndDate || null,
+        scheduled_start_time: formData.scheduledStartTime || null,
+        scheduled_end_time: formData.scheduledEndTime || null,
+        schedule_note: formData.scheduleNote || null,
         estimated_hours: formData.estimatedHours ? Number(formData.estimatedHours) : null,
         release
       };
@@ -288,16 +294,28 @@ export default function ManualWorkOrderPage({ embedded = false }: ManualWorkOrde
 
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelStyle}>Date</label>
-                <input type="date" className={inputStyle} value={formData.scheduledDate} onChange={e => setFormData({...formData, scheduledDate: e.target.value})} />
+                <label className={labelStyle}>Start Date</label>
+                <input type="date" className={inputStyle} value={formData.scheduledStartDate} onChange={e => setFormData({...formData, scheduledStartDate: e.target.value})} />
               </div>
               <div>
-                <label className={labelStyle}>Time</label>
-                <input type="time" className={inputStyle} value={formData.scheduledTime} onChange={e => setFormData({...formData, scheduledTime: e.target.value})} />
+                <label className={labelStyle}>Start Time</label>
+                <input type="time" className={inputStyle} value={formData.scheduledStartTime} onChange={e => setFormData({...formData, scheduledStartTime: e.target.value})} />
+              </div>
+              <div>
+                <label className={labelStyle}>End Date</label>
+                <input type="date" className={inputStyle} value={formData.scheduledEndDate} onChange={e => setFormData({...formData, scheduledEndDate: e.target.value})} />
+              </div>
+              <div>
+                <label className={labelStyle}>End Time</label>
+                <input type="time" className={inputStyle} value={formData.scheduledEndTime} onChange={e => setFormData({...formData, scheduledEndTime: e.target.value})} />
               </div>
               <div>
                 <label className={labelStyle}>Est. Time (Hours)</label>
                 <input type="number" step="0.5" className={inputStyle} value={formData.estimatedHours} onChange={e => setFormData({...formData, estimatedHours: e.target.value})} />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelStyle}>Schedule Note (optional)</label>
+                <textarea className={inputStyle} rows={3} value={formData.scheduleNote} onChange={e => setFormData({...formData, scheduleNote: e.target.value})} placeholder="Visit access instructions or scheduling notes" />
               </div>
             </div>
           </div>

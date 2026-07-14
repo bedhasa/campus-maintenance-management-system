@@ -5,6 +5,7 @@ use App\Models\PreventiveMaintenanceLog;
 use App\Models\PreventiveMaintenancePlan;
 use App\Models\WorkOrder;
 use App\Services\ActivityLogger;
+use App\Http\Controllers\Api\SparePartRequestController;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -57,3 +58,11 @@ Artisan::command('maintenance:process-due', function () {
 
 Schedule::command('maintenance:process-due')->hourly();
 Schedule::command('alerts:send-operational-emails')->hourly();
+
+Artisan::command('spare-part-requests:expire', function () {
+    $controller = app(SparePartRequestController::class);
+    $count = $controller->processExpirations();
+    $this->info("Expired {$count} spare part requests.");
+})->purpose('Auto-expire approved spare part requests past pickup deadline.');
+
+Schedule::command('spare-part-requests:expire')->everyFifteenMinutes();

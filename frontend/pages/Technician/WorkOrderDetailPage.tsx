@@ -691,7 +691,7 @@ export default function WorkOrderDetailPage({ id }: Props) {
     : "";
 
   return (
-    <div className="cmms-light-surface mx-auto max-w-3xl space-y-5 px-4 pb-28 pt-4 text-slate-900">
+    <div className="cmms-light-surface mx-auto w-full max-w-5xl space-y-5 px-3 sm:px-4 pb-28 pt-4 text-slate-900">
       <div className="flex items-center justify-between">
         <Link href="/technician/tasks" className="p-2 -ml-2 text-slate-500 transition-colors hover:text-slate-900">
           <ArrowLeft size={24} />
@@ -753,6 +753,20 @@ export default function WorkOrderDetailPage({ id }: Props) {
             </div>
             <p className="mt-2 text-sm font-bold capitalize text-slate-900">{statusLabel}</p>
           </div>
+          {(data.scheduled_start_date || data.scheduled_end_date) ? (
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 md:col-span-2">
+              <div className="flex items-center gap-2 text-indigo-700">
+                <Calendar size={16} className="text-indigo-600" />
+                <p className="text-[10px] font-black uppercase tracking-widest">Scheduled Visit Window</p>
+              </div>
+              <p className="mt-2 text-sm font-bold text-indigo-900">
+                {data.scheduled_start_date ?? "-"} {data.scheduled_start_time ?? ""} to {data.scheduled_end_date ?? "-"} {data.scheduled_end_time ?? ""}
+              </p>
+              {data.schedule_note ? (
+                <p className="mt-2 text-xs font-semibold text-indigo-800">Note: {data.schedule_note}</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -779,6 +793,11 @@ export default function WorkOrderDetailPage({ id }: Props) {
         <div className="absolute -right-4 -bottom-4 opacity-10">
           <User size={120} />
         </div>
+      </section>
+
+      <section className="rounded-[2rem] border border-slate-100 bg-white p-5 shadow-sm">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Assigned By Supervisor</p>
+        <p className="mt-1 text-sm font-bold text-slate-900">{supervisorName}</p>
       </section>
 
       <section className="rounded-[2rem] border border-slate-100 bg-white p-6 shadow-sm">

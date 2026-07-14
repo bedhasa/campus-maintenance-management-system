@@ -1109,7 +1109,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                       value={ratingForm.comment}
                       onChange={(e) => setRatingForm((p) => ({ ...p, comment: e.target.value }))}
                       placeholder="Share your experience with the completed work..."
-                      className="w-full p-3 rounded-xl border border-amber-100 bg-white text-sm min-h-[90px]"
+                      className="w-full p-3 rounded-xl border border-amber-100 bg-white text-sm min-h-[90px] font-semibold text-slate-900 placeholder:text-slate-500"
                     />
                   </div>
                   <button
@@ -1135,7 +1135,7 @@ export default function RequestDetailModal({ request: initialRequest, onClose, i
                     value={reopenReason}
                     onChange={(e) => setReopenReason(e.target.value)}
                     placeholder="If reopening, explain what still needs to be fixed."
-                    className="w-full p-3 rounded-xl border border-blue-100 bg-white text-sm min-h-[90px]"
+                    className="w-full p-3 rounded-xl border border-blue-100 bg-white text-sm min-h-[90px] font-semibold text-slate-900 placeholder:text-slate-500"
                   />
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button

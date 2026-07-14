@@ -1,6 +1,7 @@
 type PageSkeletonProps = {
   cards?: number;
   rows?: number;
+  title?: string;
 };
 
 type ListSkeletonProps = {
@@ -16,10 +17,10 @@ type TableRowsSkeletonProps = {
 
 const BASE = "animate-pulse rounded-xl bg-slate-200/70";
 
-export default function PageSkeleton({ cards = 4, rows = 4 }: PageSkeletonProps) {
+export default function PageSkeleton({ cards = 4, rows = 4, title }: PageSkeletonProps) {
   return (
     <div className="space-y-6">
-      <div className={`${BASE} h-8 w-64`} />
+      {title ? <div className={`${BASE} h-8 w-64`} aria-label={title} /> : <div className={`${BASE} h-8 w-64`} />}
       <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
         {Array.from({ length: cards }).map((_, index) => (
           <div key={index} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">

@@ -37,6 +37,7 @@ type ReportType =
   | "building_location"
   | "asset_reliability"
   | "spare_parts_usage"
+  | "department_analysis"
   | "technician_performance"
   | "preventive_maintenance";
 
@@ -192,6 +193,7 @@ const reportOptions: Array<{ value: ReportType; label: string; helper: string; i
   { value: "building_location", label: "Building & Location", helper: "See where problems happen across campus.", icon: <Building2 size={16} /> },
   { value: "asset_reliability", label: "Asset Reliability", helper: "Track equipment failures, condition, repair pressure, and maintenance cost.", icon: <Settings2 size={16} /> },
   { value: "spare_parts_usage", label: "Spare Parts Usage", helper: "Review part usage, waste, stock pressure, and cost.", icon: <Wrench size={16} /> },
+  { value: "department_analysis", label: "Department Analysis", helper: "Compare request volume, completion, and cost by department.", icon: <PieChart size={16} /> },
   { value: "technician_performance", label: "Technician Performance", helper: "Measure workload, completion, and pending load.", icon: <TrendingUp size={16} /> },
   { value: "preventive_maintenance", label: "Preventive Maintenance", helper: "Monitor PM schedules, overdue tasks, compliance, and costs.", icon: <CalendarClock size={16} /> },
 ];
@@ -202,6 +204,7 @@ const reportFilterMap: Record<ReportType, Array<"department" | "building" | "cat
   building_location: ["department", "building", "category"],
   asset_reliability: ["building", "category", "asset"],
   spare_parts_usage: ["department", "building", "asset"],
+  department_analysis: ["department", "building", "category", "asset"],
   technician_performance: ["department", "building", "category", "asset"],
   preventive_maintenance: ["building", "category", "asset"],
 };

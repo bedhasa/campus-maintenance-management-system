@@ -21,6 +21,7 @@ type FormState = {
   category_id: string;
   building_id: string;
   room_id: string;
+  custom_location: string;
   serial_number: string;
   status: "active" | "inactive";
 };
@@ -30,6 +31,7 @@ const emptyForm: FormState = {
   category_id: "",
   building_id: "",
   room_id: "",
+  custom_location: "",
   serial_number: "",
   status: "active",
 };
@@ -59,6 +61,7 @@ interface AssetRecord {
   building?: Building | null;
   room_id?: string;
   room?: Room | null;
+  custom_location?: string | null;
   serial_number?: string | null;
   image_path?: string | null;
   status: "active" | "inactive";
@@ -204,6 +207,7 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
       category_id: asset.category_id,
       building_id: asset.building_id ?? "",
       room_id: asset.room_id ?? "",
+      custom_location: asset.custom_location ?? "",
       serial_number: asset.serial_number ?? "",
       status: asset.status,
     });
@@ -213,8 +217,10 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
   };
 
   const saveAsset = async () => {
-    if (!form.name.trim() || !form.category_id || !form.building_id || !form.room_id) {
-      setError("Name, category, building, and room are required.");
+    const hasStructured = Boolean(form.building_id && form.room_id);
+    const hasCustom = Boolean(form.custom_location.trim());
+    if (!form.name.trim() || !form.category_id || (!hasStructured && !hasCustom)) {
+      setError("Name, category, and either building+room or custom location are required.");
       return;
     }
 
@@ -226,8 +232,9 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
       const formData = new FormData();
       formData.append("name", form.name.trim());
       formData.append("category_id", form.category_id);
-      formData.append("building_id", form.building_id);
-      formData.append("room_id", form.room_id);
+      if (form.building_id) formData.append("building_id", form.building_id);
+      if (form.room_id) formData.append("room_id", form.room_id);
+      if (form.custom_location.trim()) formData.append("custom_location", form.custom_location.trim());
       if (form.serial_number.trim()) formData.append("serial_number", form.serial_number.trim());
       formData.append("status", form.status);
       if (imageFile) formData.append("image", imageFile);
@@ -402,6 +409,16 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
                 </div>
               </div>
 
+              <div>
+                <label className={labelStyle}>Custom Location (optional)</label>
+                <input
+                  className={inputStyle}
+                  value={form.custom_location}
+                  onChange={(e) => setForm({ ...form, custom_location: e.target.value })}
+                  placeholder="Use when building/room is not listed"
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelStyle}>Serial Number</label>
@@ -539,7 +556,9 @@ export default function AssetManagementPage({ embedded = false }: AssetManagemen
                       <div className="rounded-xl border border-slate-100 bg-white p-3 shadow-sm">
                         <p className={labelStyle}>Location</p>
                         <p className="text-sm font-bold text-slate-700">
-                          {selectedAsset.building?.name ?? "No building"} - {selectedAsset.room?.name ?? "No room"}
+                          {selectedAsset.custom_location?.trim()
+                            ? selectedAsset.custom_location
+                            : `${selectedAsset.building?.name ?? "No building"} - ${selectedAsset.room?.name ?? "No room"}`}
                         </p>
                       </div>
 

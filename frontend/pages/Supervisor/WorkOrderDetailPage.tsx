@@ -76,6 +76,12 @@ type WorkOrderDetail = {
     due_date?: string | null; 
     category_id?: number;
     requester?: { fname?: string; lname?: string; phone?: string; email?: string; profile_picture_url?: string | null };
+    statusLogs?: Array<{
+      id: number;
+      comment?: string | null;
+      created_at?: string;
+      changedBy?: { fname?: string; lname?: string } | null;
+    }>;
     category?: { name?: string }; 
     building?: { name?: string }; 
     room?: { name?: string } 
@@ -277,6 +283,12 @@ export default function WorkOrderDetailPage({ id }: Props) {
   const completionReport = data.technician_completion_report;
   const completionNote = completionReport?.completion_note ?? data.completion_note;
   const completionDelayReason = completionReport?.delay_reason ?? data.delay_reason;
+  const declineLog = (data.request?.statusLogs ?? []).find((log) =>
+    (log.comment ?? "").toLowerCase().includes("technician declined assignment")
+  );
+  const declineActor = declineLog?.changedBy
+    ? `${declineLog.changedBy.fname ?? ""} ${declineLog.changedBy.lname ?? ""}`.trim()
+    : "Technician";
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -409,6 +421,25 @@ export default function WorkOrderDetailPage({ id }: Props) {
           )}
 
           {/* DELAY REASON SECTION */}
+          {declineLog && (
+            <div className="rounded-[2.5rem] border border-amber-200 bg-amber-50 p-8 shadow-sm">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="rounded-xl bg-amber-500 p-2 text-white">
+                  <AlertCircle size={18} />
+                </div>
+                <h3 className="text-sm font-black uppercase tracking-widest text-amber-800">
+                  Declined Assignment
+                </h3>
+              </div>
+              <p className="rounded-2xl border border-amber-200/60 bg-white/60 p-4 text-sm font-medium leading-relaxed text-amber-950">
+                {declineLog.comment}
+              </p>
+              <p className="mt-2 text-[10px] font-bold uppercase tracking-widest text-amber-700">
+                {declineActor} • {formatDateTime(declineLog.created_at)}
+              </p>
+            </div>
+          )}
+
           <div 
             ref={delayRef} 
             className={`rounded-[2.5rem] p-8 border-2 transition-all duration-500 ${

@@ -24,11 +24,13 @@ export default function SupervisorRequestsPage() {
   const params = useSearchParams();
   const router = useRouter();
   const [items, setItems] = useState<RequestItem[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [approvedUnassignedCount, setApprovedUnassignedCount] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const activeStatus = params?.get("status") || "all";
+  const urgentUnapproved = params?.get("urgent_unapproved") === "1";
   const initialTab = params?.get("tab") === "chat" ? "chat" : "details";
   const selectedRequestRaw = params?.get("request");
   const selectedRequestId = selectedRequestRaw ? Number(selectedRequestRaw) : NaN;
@@ -48,35 +50,45 @@ export default function SupervisorRequestsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     const status = params?.get("status");
-    const suffix = status && status !== "all" ? `?status=${encodeURIComponent(status)}` : "";
-    const [data, dashboard, approvedData] = await Promise.all([
-      apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
-        `/api/supervisor/requests${suffix}`,
-        { method: "GET" },
-        true
-      ),
-      apiRequest<{ success: boolean; summary: { new_requests: number } }>(
-        "/api/supervisor/dashboard",
-        { method: "GET" },
-        true
-      ),
-      apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
-        "/api/supervisor/requests?status=approved",
-        { method: "GET" },
-        true
-      ),
-    ]);
+    const urgent = params?.get("urgent_unapproved") === "1";
+    const query = new URLSearchParams();
+    if (status && status !== "all") query.set("status", status);
+    if (urgent) query.set("urgent_unapproved", "1");
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    try {
+      const [data, dashboard, approvedData] = await Promise.all([
+        apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
+          `/api/supervisor/requests${suffix}`,
+          { method: "GET" },
+          true
+        ),
+        apiRequest<{ success: boolean; summary: { new_requests: number } }>(
+          "/api/supervisor/dashboard",
+          { method: "GET" },
+          true
+        ),
+        apiRequest<{ success: boolean; requests: { data: RequestItem[] } }>(
+          "/api/supervisor/requests?status=approved",
+          { method: "GET" },
+          true
+        ),
+      ]);
 
-    // Filter out requests that are already assigned or in progress to keep the requests list for triage only
-    const activeRequests = (data.requests.data ?? []).filter(r => 
-      !['assigned', 'in_progress', 'completed', 'closed'].includes(r.status)
-    );
+      // Filter out requests that are already assigned or in progress to keep the requests list for triage only
+      const activeRequests = (data.requests.data ?? []).filter(r =>
+        !['assigned', 'in_progress', 'completed', 'closed'].includes(r.status)
+      );
 
-    setItems(activeRequests);
-    setPendingCount(Number(dashboard.summary?.new_requests ?? 0));
-    setApprovedUnassignedCount((approvedData.requests.data ?? []).length);
-    setLoading(false);
+      setItems(activeRequests);
+      setPendingCount(Number(dashboard.summary?.new_requests ?? 0));
+      setApprovedUnassignedCount((approvedData.requests.data ?? []).length);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Failed to load requests.");
+    } finally {
+      setLoading(false);
+    }
   }, [params]);
 
   useEffect(() => {
@@ -105,6 +117,7 @@ export default function SupervisorRequestsPage() {
   const statusFilters = [
     { label: "All Requests", value: "all" },
     { label: "Pending Review", value: "submitted" },
+    { label: "Urgent Not Approved", value: "urgent_unapproved" },
     { label: "Approved", value: "approved" },
     { label: "Rejected", value: "rejected" },
   ];
@@ -123,9 +136,19 @@ export default function SupervisorRequestsPage() {
         {statusFilters.map((f) => (
           <button
             key={f.value}
-            onClick={() => router.push(`/supervisor/requests${f.value === 'all' ? '' : `?status=${f.value}`}`)}
+            onClick={() => {
+              if (f.value === "all") {
+                router.push("/supervisor/requests");
+              } else if (f.value === "urgent_unapproved") {
+                router.push("/supervisor/requests?urgent_unapproved=1");
+              } else {
+                router.push(`/supervisor/requests?status=${f.value}`);
+              }
+            }}
             className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
-              activeStatus === f.value ? "bg-white text-[#003366] shadow-sm" : "text-slate-500 hover:text-slate-700"
+              (f.value === "urgent_unapproved" ? urgentUnapproved : activeStatus === f.value && !urgentUnapproved)
+                ? "bg-white text-[#003366] shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
             }`}
           >
             <span className="inline-flex items-center gap-2">
@@ -149,6 +172,11 @@ export default function SupervisorRequestsPage() {
         <ListSkeleton rows={5} />
       ) : (
         <div className="grid gap-3">
+          {loadError ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {loadError}
+            </div>
+          ) : null}
           {items.map((r) => (
             <div key={r.id} className="group bg-white border border-slate-100 rounded-3xl p-5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300">
               <div className="flex gap-4 items-start">

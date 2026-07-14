@@ -5,7 +5,7 @@ type ApiError = {
   errors?: Record<string, string[]>;
 };
 
-const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_TIMEOUT_MS = 60000;
 
 export function readAuthToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -89,7 +89,11 @@ export async function apiRequest<T>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let didTimeout = false;
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, timeoutMs);
 
   if (options.signal) {
     options.signal.addEventListener("abort", () => controller.abort(), { once: true });
@@ -104,7 +108,10 @@ export async function apiRequest<T>(
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Request timed out. Please try again.");
+      if (didTimeout) {
+        throw new Error("Request timed out. Please try again.");
+      }
+      throw new Error("Request was interrupted. Please try again.");
     }
     throw new Error("Unable to reach the server. Please check your connection and try again.");
   } finally {

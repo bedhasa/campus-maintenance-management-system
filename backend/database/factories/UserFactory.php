@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Models\Department;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -30,7 +31,10 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'password' => static::$password ??= Hash::make('password'),
             'university_id_number' => (string) fake()->unique()->numberBetween(1000000, 9999999),
-            'dept_id' => 1,
+            'dept_id' => Department::query()->value('id') ?? Department::create([
+                'name' => 'General',
+                'faculty' => 'General',
+            ])->id,
             'phone' => fake()->phoneNumber(),
             'remember_token' => Str::random(10),
         ];

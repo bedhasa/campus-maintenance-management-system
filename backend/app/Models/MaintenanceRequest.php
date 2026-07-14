@@ -15,6 +15,7 @@ class MaintenanceRequest extends Model
         'title',
         'description',
         'category_id',
+        'custom_category',
         'building_id',
         'room_id',
         'custom_location',

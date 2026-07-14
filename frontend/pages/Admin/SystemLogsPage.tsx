@@ -2,9 +2,8 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { apiRequest, readAuthToken } from "@/lib/api";
-import { buildApiUrl } from "@/lib/runtime-config";
-import { Download, Filter, Search, X } from "lucide-react";
+import { apiRequest } from "@/lib/api";
+import { Filter, Search, X } from "lucide-react";
 
 type Log = {
   id: number;
@@ -52,7 +51,7 @@ export default function SystemLogsPage() {
     router.push(query ? `${nextPath}?${query}` : nextPath);
   };
 
-  const load = async (opts?: { exportExcel?: boolean }) => {
+  const load = async () => {
     setLoading(true);
     setError(null);
     try {
@@ -63,35 +62,6 @@ export default function SystemLogsPage() {
       if (status.trim()) query.set("status", status.trim());
       if (from) query.set("from", from);
       if (to) query.set("to", to);
-
-      if (opts?.exportExcel) {
-        query.set("export", "excel");
-        const token = readAuthToken();
-        const res = await fetch(buildApiUrl(`/api/admin/system-logs?${query.toString()}`), {
-          method: "GET",
-          headers: {
-            Accept: "application/vnd.ms-excel",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `Export failed with status ${res.status}.`);
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        const now = new Date();
-        const datePart = now.toISOString().slice(0, 10);
-        const timePart = [now.getHours(), now.getMinutes(), now.getSeconds()].map((v) => String(v).padStart(2, "0")).join("-");
-        a.download = `system-logs-${datePart}_${timePart}.xls`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        return;
-      }
 
       const data = await apiRequest<{ success: boolean; logs: { data: Log[] } }>(`/api/admin/system-logs?${query.toString()}`, { method: "GET" }, true);
       setLogs(data.logs.data ?? []);
@@ -159,13 +129,6 @@ export default function SystemLogsPage() {
               Track logins, asset updates, warnings, and other important activities. Click a row to see full detail.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void load({ exportExcel: true })}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#003366] px-4 py-3 text-xs font-black uppercase tracking-wider text-white transition hover:bg-[#0b4480]"
-          >
-            <Download size={16} /> Export Excel
-          </button>
         </div>
       </div>
 

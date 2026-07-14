@@ -779,6 +779,10 @@ class InventoryController extends ModuleController
 
     private function isWorkOrderApproved(WorkOrder $workOrder): bool
     {
+        if (!$workOrder->request_id) {
+            return true;
+        }
+
         $requestStatus = $workOrder->request?->status;
         return in_array($requestStatus, ['approved', 'assigned', 'in_progress', 'completed', 'closed'], true);
     }

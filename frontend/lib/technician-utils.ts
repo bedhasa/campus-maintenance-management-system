@@ -50,9 +50,15 @@ export type TechnicianWorkOrder = {
   id: number;
   title?: string | null;
   description?: string | null;
+  priority?: "low" | "medium" | "high" | "urgent" | string | null;
   work_status: "assigned" | "in_progress" | "paused" | "completed" | string;
   expected_completion_date?: string | null;
   delay_reason?: string | null;
+  scheduled_start_date?: string | null;
+  scheduled_end_date?: string | null;
+  scheduled_start_time?: string | null;
+  scheduled_end_time?: string | null;
+  schedule_note?: string | null;
   completion_note?: string | null;
   problem_found?: string | null;
   action_taken?: string | null;
