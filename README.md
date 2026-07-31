@@ -159,6 +159,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api
 - Mobile application
 - Predictive maintenance using AI
 - Equipment inventory integration
+- IoT integration
 
 ---
 
